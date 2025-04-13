@@ -304,6 +304,10 @@ async def play_random_toybox(interaction: discord.Interaction):
 @bot.event
 async def on_ready():
     print(f"Bot {bot.user} is online.")
+    
+    # Setze den Status des Bots auf "Playing Disney Infinity"
+    await bot.change_presence(activity=discord.Game(name="Community Toyboxes"))
+
     # Lade die gespeicherten Bewertungen, wenn der Bot startet
     load_ratings()
 
