@@ -257,7 +257,6 @@ async def edit_ratings(interaction: discord.Interaction, message_id: str, user_t
         # Wenn der Benutzer nicht in der Liste ist, sende eine Fehlermeldung
         await interaction.response.send_message(f"User ID <@{user_to_remove}> has not voted on this message.", ephemeral=True)
 
-
 # Befehl zum Top rated
 @bot.tree.command(name="list", description="Show the top 30 toyboxes based on ratings.")
 async def list_top_toyboxes(interaction: discord.Interaction):
@@ -281,12 +280,16 @@ async def list_top_toyboxes(interaction: discord.Interaction):
     # Formatiere die Ausgabe mit Zahlen-Emojis
     number_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟", "1️⃣1️⃣", "1️⃣2️⃣", "1️⃣3️⃣", "1️⃣4️⃣", "1️⃣5️⃣", "1️⃣6️⃣", "1️⃣7️⃣", "1️⃣8️⃣", "1️⃣9️⃣", "2️⃣0️⃣", "2️⃣1️⃣", "2️⃣2️⃣", "2️⃣3️⃣", "2️⃣4️⃣", "2️⃣5️⃣", "2️⃣6️⃣", "2️⃣7️⃣", "2️⃣8️⃣", "2️⃣9️⃣", "3️⃣0️⃣"]
 
-    ranking_list = "\n".join(
-        [f"{number_emojis[i]} [{title}](https://discord.com/channels/{interaction.guild_id}/{channel_id}/{msg_id}): {avg_rating:.2f} ⭐️ ({num_ratings} ratings)"
-         for i, (msg_id, avg_rating, num_ratings, channel_id, title) in enumerate(top_30)]
-    )
+    # Erstelle den Embed
+    embed = discord.Embed(title="⭐️ TOP 30 TOYBOXES ⭐️", color=discord.Color.gold())
+    
+    # Füge jede Toybox als neues Feld im Embed hinzu
+    for i, (msg_id, avg_rating, num_ratings, channel_id, title) in enumerate(top_30):
+        ranking_text = f"{avg_rating:.2f} ⭐️ ({num_ratings} ratings)"
+        embed.add_field(name=f"{number_emojis[i]} {title}", value=ranking_text, inline=False)
 
-    await interaction.response.send_message(f"**⭐️ TOP 30 TOYBOXES ⭐️**\n{ranking_list}")
+    # Sende den Embed
+    await interaction.response.send_message(embed=embed)
 
 # Befehl zum zufälligen Abspielen einer bewerteten Toybox
 @bot.tree.command(name="play", description="Play a random rated toybox.")
