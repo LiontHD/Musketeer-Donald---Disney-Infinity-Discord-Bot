@@ -257,39 +257,60 @@ async def edit_ratings(interaction: discord.Interaction, message_id: str, user_t
         # Wenn der Benutzer nicht in der Liste ist, sende eine Fehlermeldung
         await interaction.response.send_message(f"User ID <@{user_to_remove}> has not voted on this message.", ephemeral=True)
 
+import math
+
+def calculate_wilson_score(avg_rating, num_ratings, confidence=1.96):
+    if num_ratings == 0:
+        return 0
+    z = confidence
+    phat = (avg_rating - 1) / 4  # Umwandlung von Bewertung auf eine Skala von 0 bis 1
+    return (phat + z**2 / (2 * num_ratings) - z * math.sqrt((phat * (1 - phat) + z**2 / (4 * num_ratings)) / num_ratings)) / (1 + z**2 / num_ratings)
+
 # Befehl zum Top rated
-@bot.tree.command(name="list", description="Show the top 30 toyboxes based on ratings.")
+@bot.tree.command(name="list", description="Show the top 100 toyboxes based on ratings.")
 async def list_top_toyboxes(interaction: discord.Interaction):
     if not message_ratings:
         await interaction.response.send_message("No toyboxes have been rated yet.")
         return
 
-    top_30 = []
+    top_100 = []
     for msg_id, data in message_ratings.items():
         if 'ratings' in data and data['ratings']:
             avg_rating = data['average']
             num_ratings = data['num_ratings']
-            # Sichere Abfrage der channel_id mit fallback auf den aktuellen Kanal
-            channel_id = data.get('channel_id', interaction.channel.id)  # Stelle sicher, dass channel_id existiert
             title = channel_titles.get(msg_id, "Unknown Toybox")
-            top_30.append((msg_id, avg_rating, num_ratings, channel_id, title))
+            score = calculate_wilson_score(avg_rating, num_ratings)
+            top_100.append((msg_id, score, avg_rating, num_ratings, title))
 
-    # Sortiere basierend auf dem Durchschnittswert
-    top_30 = sorted(top_30, key=lambda x: x[1], reverse=True)[:30]
+    # Sortiere basierend auf dem Wilson-Score und beschränke auf die Top 100
+    top_100 = sorted(top_100, key=lambda x: x[1], reverse=True)[:100]
 
-    # Formatiere die Ausgabe mit Zahlen-Emojis
-    number_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟", "1️⃣1️⃣", "1️⃣2️⃣", "1️⃣3️⃣", "1️⃣4️⃣", "1️⃣5️⃣", "1️⃣6️⃣", "1️⃣7️⃣", "1️⃣8️⃣", "1️⃣9️⃣", "2️⃣0️⃣", "2️⃣1️⃣", "2️⃣2️⃣", "2️⃣3️⃣", "2️⃣4️⃣", "2️⃣5️⃣", "2️⃣6️⃣", "2️⃣7️⃣", "2️⃣8️⃣", "2️⃣9️⃣", "3️⃣0️⃣"]
+    # Emojis für die Rangnummerierung
+    number_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟",
+                     "1️⃣1️⃣", "1️⃣2️⃣", "1️⃣3️⃣", "1️⃣4️⃣", "1️⃣5️⃣", "1️⃣6️⃣", "1️⃣7️⃣", "1️⃣8️⃣", "1️⃣9️⃣", "2️⃣0️⃣",
+                     "2️⃣1️⃣", "2️⃣2️⃣", "2️⃣3️⃣", "2️⃣4️⃣", "2️⃣5️⃣", "2️⃣6️⃣", "2️⃣7️⃣", "2️⃣8️⃣", "2️⃣9️⃣", "3️⃣0️⃣",
+                     "3️⃣1️⃣", "3️⃣2️⃣", "3️⃣3️⃣", "3️⃣4️⃣", "3️⃣5️⃣", "3️⃣6️⃣", "3️⃣7️⃣", "3️⃣8️⃣", "3️⃣9️⃣", "4️⃣0️⃣",
+                     "4️⃣1️⃣", "4️⃣2️⃣", "4️⃣3️⃣", "4️⃣4️⃣", "4️⃣5️⃣", "4️⃣6️⃣", "4️⃣7️⃣", "4️⃣8️⃣", "4️⃣9️⃣", "5️⃣0️⃣",
+                     "5️⃣1️⃣", "5️⃣2️⃣", "5️⃣3️⃣", "5️⃣4️⃣", "5️⃣5️⃣", "5️⃣6️⃣", "5️⃣7️⃣", "5️⃣8️⃣", "5️⃣9️⃣", "6️⃣0️⃣",
+                     "6️⃣1️⃣", "6️⃣2️⃣", "6️⃣3️⃣", "6️⃣4️⃣", "6️⃣5️⃣", "6️⃣6️⃣", "6️⃣7️⃣", "6️⃣8️⃣", "6️⃣9️⃣", "7️⃣0️⃣",
+                     "7️⃣1️⃣", "7️⃣2️⃣", "7️⃣3️⃣", "7️⃣4️⃣", "7️⃣5️⃣", "7️⃣6️⃣", "7️⃣7️⃣", "7️⃣8️⃣", "7️⃣9️⃣", "8️⃣0️⃣",
+                     "8️⃣1️⃣", "8️⃣2️⃣", "8️⃣3️⃣", "8️⃣4️⃣", "8️⃣5️⃣", "8️⃣6️⃣", "8️⃣7️⃣", "8️⃣8️⃣", "8️⃣9️⃣", "9️⃣0️⃣",
+                     "9️⃣1️⃣", "9️⃣2️⃣", "9️⃣3️⃣", "9️⃣4️⃣", "9️⃣5️⃣", "9️⃣6️⃣", "9️⃣7️⃣", "9️⃣8️⃣", "9️⃣9️⃣", "💯"]
 
-    # Erstelle den Embed
-    embed = discord.Embed(title="⭐️ TOP 30 TOYBOXES ⭐️", color=discord.Color.gold())
-    
-    # Füge jede Toybox als neues Feld im Embed hinzu
-    for i, (msg_id, avg_rating, num_ratings, channel_id, title) in enumerate(top_30):
-        ranking_text = f"{avg_rating:.2f} ⭐️ ({num_ratings} ratings)"
-        embed.add_field(name=f"{number_emojis[i]} {title}", value=ranking_text, inline=False)
+    # Aufteilen in mehrere Embeds, falls mehr als 25 Einträge
+    embeds = []
+    for chunk_start in range(0, len(top_100), 25):
+        embed = discord.Embed(title="⭐️ TOP 100 TOYBOXES ⭐️", color=discord.Color.gold())
+        for i, (msg_id, score, avg_rating, num_ratings, title) in enumerate(top_100[chunk_start:chunk_start + 25], start=chunk_start):
+            ranking_text = f"{avg_rating:.2f} ⭐️ ({num_ratings} ratings)"
+            embed.add_field(name=f"{number_emojis[i]} {title}", value=ranking_text, inline=False)
+        embeds.append(embed)
 
-    # Sende den Embed
-    await interaction.response.send_message(embed=embed)
+    # Sende alle Embeds
+    for embed in embeds:
+        await interaction.response.send_message(embed=embed) if embed == embeds[0] else await interaction.followup.send(embed=embed)
+
+
 
 # Befehl zum zufälligen Abspielen einer bewerteten Toybox
 @bot.tree.command(name="play", description="Play a random rated toybox.")
