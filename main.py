@@ -4,7 +4,10 @@ from discord.ui import Button, View
 import random
 import json
 import os
-
+import zipfile
+import io
+import re
+import math
 # Discord Bot Token
 TOKEN = 'MTI4OTk1MzMwMzU2Mzg2NjIwNg.GVdTII.BOK5_lAc0bWXOB7e4YruJETaY9IssdMf73Ixe4'  # Bitte Token sicher aufbewahren
 
@@ -310,7 +313,110 @@ async def list_top_toyboxes(interaction: discord.Interaction):
     for embed in embeds:
         await interaction.response.send_message(embed=embed) if embed == embeds[0] else await interaction.followup.send(embed=embed)
 
+@bot.tree.command(
+    name="toybox_to_toybox_game",
+    description="Convert toybox files in a ZIP and optionally change their number"
+)
+async def toybox_to_toybox_game(
+    interaction: discord.Interaction,
+    zip_file: discord.Attachment,
+    new_number: int = None
+):
+    # Validate the optional number input
+    if new_number is not None and not (1 <= new_number <= 100):
+        await interaction.response.send_message(
+            "The number must be between 1 and 100!",
+            ephemeral=True
+        )
+        return
 
+    # Check if the uploaded file is a ZIP
+    if not zip_file.filename.endswith('.zip'):
+        await interaction.response.send_message(
+            "Please upload a ZIP file!",
+            ephemeral=True
+        )
+        return
+
+    try:
+        # Download the ZIP file
+        zip_content = await zip_file.read()
+        input_zip = zipfile.ZipFile(io.BytesIO(zip_content))
+        
+        # Create a new ZIP file in memory
+        output_zip_buffer = io.BytesIO()
+        output_zip = zipfile.ZipFile(output_zip_buffer, 'w', zipfile.ZIP_DEFLATED)
+        
+        # Get the folder name from the ZIP (assuming single folder)
+        folder_name = None
+        for name in input_zip.namelist():
+            if name.endswith('/'):
+                folder_name = name
+                break
+        
+        if not folder_name:
+            await interaction.response.send_message(
+                "The ZIP file must contain a folder!",
+                ephemeral=True
+            )
+            return
+
+        # Process each file
+        for file_name in input_zip.namelist():
+            if file_name.endswith('/'):  # Skip directories
+                continue
+                
+            # Read the file content
+            content = input_zip.read(file_name)
+            
+            # Get just the filename without path
+            base_name = os.path.basename(file_name)
+            
+            # Convert filename by changing only the last R to A in each pattern
+            new_name = base_name
+            if 'EHRR' in new_name:
+                new_name = new_name.replace('EHRR', 'EHRA', 1)
+            elif 'ERR' in new_name:
+                new_name = new_name.replace('ERR', 'ERA', 1)
+            elif 'SCRR' in new_name:
+                new_name = new_name.replace('SCRR', 'SCRA', 1)
+            elif 'SHRR' in new_name:
+                new_name = new_name.replace('SHRR', 'SHRA', 1)
+            elif 'SRR' in new_name:
+                new_name = new_name.replace('SRR', 'SRA', 1)
+            
+            # If a new number was provided, replace the existing number
+            if new_number is not None:
+                # Use regex to replace any number before the file extension
+                new_name = re.sub(r'\d+(?=A?$)', str(new_number), new_name)
+            
+            # Write to new ZIP with the same folder structure
+            output_zip.writestr(os.path.join(folder_name, new_name), content)
+        
+        # Close the ZIPs
+        input_zip.close()
+        output_zip.close()
+        
+        # Prepare the output ZIP for sending
+        output_zip_buffer.seek(0)
+        
+        # Send the modified ZIP file
+        file = discord.File(
+            fp=output_zip_buffer,
+            filename=os.path.basename(folder_name.rstrip('/')) + '.zip'
+        )
+        
+        await interaction.response.send_message(
+            "Toybox converted to Toybox Game:",
+            file=file
+        )
+        
+    except Exception as e:
+        await interaction.response.send_message(
+            f"An error occurred: {str(e)}",
+            ephemeral=True
+        )
+        return
 
 # Befehl zum zufälligen Abspielen einer bewerteten Toybox
 @bot.tree.command(name="play", description="Play a random rated toybox.")
