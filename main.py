@@ -418,6 +418,205 @@ async def toybox_to_toybox_game(
         )
         return
 
+@bot.tree.command(
+    name="toybox_game_to_toybox",
+    description="Convert a toybox game ZIP back to a regular toybox format"
+)
+async def toybox_game_to_toybox(
+    interaction: discord.Interaction,
+    zip_file: discord.Attachment,
+    new_number: int = None
+):
+    # Validate the optional number input
+    if new_number is not None and not (1 <= new_number <= 300):
+        await interaction.response.send_message(
+            "The number must be between 1 and 300!",
+            ephemeral=True
+        )
+        return
+
+    # Check if the uploaded file is a ZIP
+    if not zip_file.filename.endswith('.zip'):
+        await interaction.response.send_message(
+            "Please upload a ZIP file!",
+            ephemeral=True
+        )
+        return
+
+    try:
+        # Download the ZIP file
+        zip_content = await zip_file.read()
+        input_zip = zipfile.ZipFile(io.BytesIO(zip_content))
+        
+        # Create a new ZIP file in memory
+        output_zip_buffer = io.BytesIO()
+        output_zip = zipfile.ZipFile(output_zip_buffer, 'w', zipfile.ZIP_DEFLATED)
+        
+        # Get the folder name from the ZIP (assuming single folder)
+        folder_name = None
+        for name in input_zip.namelist():
+            if name.endswith('/'):
+                folder_name = name
+                break
+        
+        if not folder_name:
+            await interaction.response.send_message(
+                "The ZIP file must contain a folder!",
+                ephemeral=True
+            )
+            return
+
+        # Mapping of old prefixes to new prefixes
+        replacements = {
+            'EHRA': 'EHRR',
+            'ERA': 'ERR',
+            'SCRA': 'SCRR',
+            'SHRA': 'SHRR',
+            'SRA': 'SRR'
+        }
+
+        # Process each file
+        for file_name in input_zip.namelist():
+            if file_name.endswith('/'):  # Skip directories
+                continue
+                
+            # Read the file content
+            content = input_zip.read(file_name)
+            
+            # Get just the filename without path
+            base_name = os.path.basename(file_name)
+
+            # Replace prefixes
+            new_name = base_name
+            for old, new in replacements.items():
+                if base_name.startswith(old):
+                    new_name = base_name.replace(old, new, 1)
+                    break  # Stop after first match
+
+            # If a new number was provided, replace the existing number
+            if new_number is not None:
+                # Use regex to replace the existing number before "A" (if present)
+                new_name = re.sub(r'\d+(?=A?$)', str(new_number), new_name)
+            
+            # Write to new ZIP with the same folder structure
+            output_zip.writestr(os.path.join(folder_name, new_name), content)
+        
+        # Close the ZIPs
+        input_zip.close()
+        output_zip.close()
+        
+        # Prepare the output ZIP for sending
+        output_zip_buffer.seek(0)
+        
+        # Send the modified ZIP file
+        file = discord.File(
+            fp=output_zip_buffer,
+            filename=os.path.basename(folder_name.rstrip('/')) + '.zip'
+        )
+        
+        await interaction.response.send_message(
+            "Toybox Game converted back to Toybox:",
+            file=file
+        )
+        
+    except Exception as e:
+        await interaction.response.send_message(
+            f"An error occurred: {str(e)}",
+            ephemeral=True
+        )
+        return
+
+@bot.tree.command(
+    name="change_number",
+    description="Change the number in toybox or toybox game files inside a ZIP"
+)
+async def change_number(
+    interaction: discord.Interaction,
+    zip_file: discord.Attachment,
+    new_number: int
+):
+    # Validate number input (1-300)
+    if not (1 <= new_number <= 300):
+        await interaction.response.send_message(
+            "The number must be between 1 and 300!",
+            ephemeral=True
+        )
+        return
+
+    # Check if the uploaded file is a ZIP
+    if not zip_file.filename.endswith('.zip'):
+        await interaction.response.send_message(
+            "Please upload a ZIP file!",
+            ephemeral=True
+        )
+        return
+
+    try:
+        # Download the ZIP file
+        zip_content = await zip_file.read()
+        input_zip = zipfile.ZipFile(io.BytesIO(zip_content))
+        
+        # Create a new ZIP file in memory
+        output_zip_buffer = io.BytesIO()
+        output_zip = zipfile.ZipFile(output_zip_buffer, 'w', zipfile.ZIP_DEFLATED)
+        
+        # Get the folder name from the ZIP (assuming single folder)
+        folder_name = None
+        for name in input_zip.namelist():
+            if name.endswith('/'):
+                folder_name = name
+                break
+        
+        if not folder_name:
+            await interaction.response.send_message(
+                "The ZIP file must contain a folder!",
+                ephemeral=True
+            )
+            return
+
+        # Process each file
+        for file_name in input_zip.namelist():
+            if file_name.endswith('/'):  # Skip directories
+                continue
+                
+            # Read the file content
+            content = input_zip.read(file_name)
+            
+            # Get just the filename without path
+            base_name = os.path.basename(file_name)
+
+            # Replace the number in the filename (keeping any letter after it)
+            new_name = re.sub(r'(\d+)([A-Z]?)$', f"{new_number}\\2", base_name)
+
+            # Write to new ZIP with the same folder structure
+            output_zip.writestr(os.path.join(folder_name, new_name), content)
+        
+        # Close the ZIPs
+        input_zip.close()
+        output_zip.close()
+        
+        # Prepare the output ZIP for sending
+        output_zip_buffer.seek(0)
+        
+        # Send the modified ZIP file
+        file = discord.File(
+            fp=output_zip_buffer,
+            filename=os.path.basename(folder_name.rstrip('/')) + '.zip'
+        )
+        
+        await interaction.response.send_message(
+            "File numbers changed successfully:",
+            file=file
+        )
+        
+    except Exception as e:
+        await interaction.response.send_message(
+            f"An error occurred: {str(e)}",
+            ephemeral=True
+        )
+        return
+
+
 # Befehl zum zufälligen Abspielen einer bewerteten Toybox
 @bot.tree.command(name="play", description="Play a random rated toybox.")
 async def play_random_toybox(interaction: discord.Interaction):
