@@ -574,6 +574,9 @@ async def change_number(
             )
             return
 
+        # Variable to store the first detected old number
+        old_number = None
+
         # Process each file
         for file_name in input_zip.namelist():
             if file_name.endswith('/'):  # Skip directories
@@ -585,12 +588,17 @@ async def change_number(
             # Get just the filename without path
             base_name = os.path.basename(file_name)
 
-            # Replace the number in the filename (keeping any letter after it)
-            new_name = re.sub(r'(\d+)([A-Z]?)$', f"{new_number}\\2", base_name)
+            # Extract the old number using regex
+            match = re.search(r'(\d+)([A-Z]?)$', base_name)
+            if match and old_number is None:  # Save only the first found number
+                old_number = match.group(1)
+
+            # Replace the number while keeping the suffix
+            new_name = re.sub(r'\d+([A-Z]?)$', f"{new_number}\\1", base_name)
 
             # Write to new ZIP with the same folder structure
             output_zip.writestr(os.path.join(folder_name, new_name), content)
-        
+
         # Close the ZIPs
         input_zip.close()
         output_zip.close()
@@ -598,16 +606,18 @@ async def change_number(
         # Prepare the output ZIP for sending
         output_zip_buffer.seek(0)
         
-        # Send the modified ZIP file
+        # Create the final message
+        final_message = (
+            f"File number changed from {old_number} to {new_number}."
+            if old_number else f"File number changed to {new_number}."
+        )
+
         file = discord.File(
             fp=output_zip_buffer,
             filename=os.path.basename(folder_name.rstrip('/')) + '.zip'
         )
         
-        await interaction.response.send_message(
-            "File numbers changed successfully:",
-            file=file
-        )
+        await interaction.response.send_message(final_message, file=file)
         
     except Exception as e:
         await interaction.response.send_message(
