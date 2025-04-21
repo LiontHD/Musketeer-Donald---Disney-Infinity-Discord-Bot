@@ -634,12 +634,12 @@ CONTENT_OFFSET = 84  # Offset für die Metadaten
 
 @bot.tree.command(
     name="meta",
-    description="Extracts metadata from an EHRR file."
+    description="Extracts metadata from an EHRR or EHRA file."
 )
 async def meta(interaction: discord.Interaction, ehr_file: discord.Attachment):
-    # Prüfen, ob die Datei mit "EHRR" beginnt
-    if not ehr_file.filename.startswith("EHRR"):
-        await interaction.response.send_message("Please upload a valid EHRR file!", ephemeral=True)
+    # Prüfen, ob die Datei mit "EHRR" oder "EHRA" beginnt
+    if not (ehr_file.filename.startswith("EHRR") or ehr_file.filename.startswith("EHRA")):
+        await interaction.response.send_message("Please upload a valid EHRR or EHRA file!", ephemeral=True)
         return
 
     try:
