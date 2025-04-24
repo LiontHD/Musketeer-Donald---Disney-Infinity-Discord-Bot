@@ -4,11 +4,13 @@ from discord.ui import Button, View
 import random
 import json
 import os
+import aiofiles
 import zipfile
 import io
 import re
 import math
 import zlib
+import tempfile
 # Discord Bot Token
 TOKEN = 'MTI4OTk1MzMwMzU2Mzg2NjIwNg.GVdTII.BOK5_lAc0bWXOB7e4YruJETaY9IssdMf73Ixe4'  # Bitte Token sicher aufbewahren
 
@@ -637,42 +639,72 @@ CONTENT_OFFSET = 84  # Offset für die Metadaten
     description="Extracts metadata from an EHRR or EHRA file."
 )
 async def meta(interaction: discord.Interaction, ehr_file: discord.Attachment):
-    # Prüfen, ob die Datei mit "EHRR" oder "EHRA" beginnt
-    if not (ehr_file.filename.startswith("EHRR") or ehr_file.filename.startswith("EHRA")):
-        await interaction.response.send_message("Please upload a valid EHRR or EHRA file!", ephemeral=True)
-        return
-
     try:
-        # Datei herunterladen und Bytes auslesen
-        file_bytes = await ehr_file.read()
-        
-        # Daten ab Offset lesen und dekomprimieren
-        decompressed_data = zlib.decompress(file_bytes[CONTENT_OFFSET:]).decode('utf-8').rstrip('\x00')
-        
-        # Metadaten extrahieren
-        auth_name_match = re.search(AUTHOREDNAME_PATTERN, decompressed_data)
-        auth_desc_match = re.search(AUTHOREDDESC_PATTERN, decompressed_data)
-        date_string_match = re.search(DATESTRING_PATTERN, decompressed_data)
-
-        # Nachricht erstellen
-        metadata_text = "**Metadata Extracted:**\n"
-        if auth_name_match:
-            metadata_text += f"**Name:** {auth_name_match.group(1)}\n"
-        if auth_desc_match:
-            metadata_text += f"**Description:** {auth_desc_match.group(1)}\n"
-        if date_string_match:
-            metadata_text += f"**Date:** {date_string_match.group(1)}\n"
-
-        # Falls keine Metadaten gefunden wurden
-        if not (auth_name_match or auth_desc_match or date_string_match):
-            metadata_text = "No metadata found in the file."
-
-        await interaction.response.send_message(metadata_text)
+        # Temporären Speicherort für Datei erstellen
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = f"{temp_dir}/{ehr_file.filename}"
+            
+            # Datei herunterladen und speichern
+            async with aiofiles.open(file_path, 'wb') as f:
+                await f.write(await ehr_file.read())
+            
+            extracted_file_path = None
+            
+            # Prüfen, ob eine ZIP-Datei hochgeladen wurde
+            if ehr_file.filename.endswith(".zip"):
+                with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                    zip_ref.extractall(temp_dir)
+                    
+                    # Nach EHRR oder EHRA Datei suchen
+                    for root, _, files in os.walk(temp_dir):
+                        for file in files:
+                            if file.startswith("EHRR") or file.startswith("EHRA"):
+                                extracted_file_path = os.path.join(root, file)
+                                break
+                        if extracted_file_path:
+                            break
+            else:
+                extracted_file_path = file_path
+            
+            # Falls keine passende Datei gefunden wurde
+            if not extracted_file_path:
+                await interaction.response.send_message("No valid EHRR or EHRA file found in the ZIP!", ephemeral=True)
+                return
+            
+            # Datei auslesen
+            async with aiofiles.open(extracted_file_path, 'rb') as f:
+                file_bytes = await f.read()
+                
+            # Daten ab Offset lesen und dekomprimieren
+            decompressed_data = zlib.decompress(file_bytes[CONTENT_OFFSET:]).decode('utf-8').rstrip('\x00')
+            
+            # Metadaten extrahieren
+            auth_name_match = re.search(AUTHOREDNAME_PATTERN, decompressed_data)
+            auth_desc_match = re.search(AUTHOREDDESC_PATTERN, decompressed_data)
+            date_string_match = re.search(DATESTRING_PATTERN, decompressed_data)
+            
+            # Nachricht erstellen
+            metadata_text = "**Metadata Extracted:**\n"
+            if auth_name_match:
+                metadata_text += f"**Name:** {auth_name_match.group(1)}\n"
+            if auth_desc_match:
+                metadata_text += f"**Description:** {auth_desc_match.group(1)}\n"
+            if date_string_match:
+                metadata_text += f"**Date:** {date_string_match.group(1)}\n"
+            
+            # Falls keine Metadaten gefunden wurden
+            if not (auth_name_match or auth_desc_match or date_string_match):
+                metadata_text = "No metadata found in the file."
+            
+            await interaction.response.send_message(metadata_text)
     
+    except zipfile.BadZipFile:
+        await interaction.response.send_message("Error: Invalid ZIP file!", ephemeral=True)
     except zlib.error:
         await interaction.response.send_message("Error: Could not decompress the file!", ephemeral=True)
     except Exception as e:
         await interaction.response.send_message(f"An error occurred: {str(e)}", ephemeral=True)
+
 
 # Befehl zum zufälligen Abspielen einer bewerteten Toybox
 @bot.tree.command(name="play", description="Play a random rated toybox.")
