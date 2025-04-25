@@ -725,6 +725,10 @@ async def on_ready():
     try:
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} command(s)")
+
+        # Registriert die Persistente View
+        bot.add_view(PlayView())
+        print("Persistent views registered successfully.")
     except Exception as e:
         print(f"Error syncing commands: {e}")
 
@@ -789,6 +793,74 @@ async def random_thread(interaction: discord.Interaction, count: int = 1):
     
     # Antwort senden
     await interaction.response.send_message(f"{message_prefix}\n{thread_links}", ephemeral=True)
+
+
+class PlayView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)  # Keine Zeitbegrenzung für die View
+        self.count = 1  # Standardwert für die Anzahl der Toyboxes
+
+    @discord.ui.select(
+        placeholder="Select number of random Toyboxes",  # Platzhalter zurücksetzen
+        options=[
+            discord.SelectOption(label=str(i), value=str(i)) for i in range(1, 21)
+        ],
+        custom_id="select_toybox_count"  # Wichtiger Custom ID für Persistenz
+    )
+    async def select_count(self, interaction: discord.Interaction, select: discord.ui.Select):
+        # Speichert die ausgewählte Anzahl, ohne eine Nachricht zu senden
+        self.count = int(select.values[0])
+        await interaction.response.defer()  # Bestätigt die Aktion, ohne eine sichtbare Antwort zu geben
+
+    @discord.ui.button(label="Random", style=discord.ButtonStyle.blurple, custom_id="random_toybox_button")
+    async def random_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Forum-Kanal abrufen
+        forum_channel = interaction.guild.get_channel(forum_channel_id)
+        if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
+            await interaction.response.send_message("Error: Forum channel not found!", ephemeral=True)
+            return
+
+        # Alle Threads abrufen
+        threads = forum_channel.threads
+        if not threads:
+            await interaction.response.send_message("No toyboxes found!", ephemeral=True)
+            return
+
+        # Zufällige Threads auswählen
+        selected_threads = random.sample(threads, min(self.count, len(threads)))
+        thread_links = '\n'.join(thread.jump_url for thread in selected_threads)
+
+        # Nachricht senden
+        message_prefix = "Play this Toybox:" if len(selected_threads) == 1 else "Play these Toyboxes:"
+        await interaction.response.send_message(f"{message_prefix}\n{thread_links}", ephemeral=True)
+
+        # Auswahl im Dropdown-Menü zurücksetzen
+        self.children[0].placeholder = "Select number of random Toyboxes"
+        await interaction.message.edit(view=self)
+
+
+@bot.tree.command(
+    name="play_init",
+    description="Start an interactive Toybox randomizer"
+)
+async def play_init(interaction: discord.Interaction):
+    # Embed erstellen
+    embed = discord.Embed(
+        title="Random Toybox Selection",
+        description=(
+            "**Which Toybox should I play? Let us surprise you!** 🎁\n"
+            "1. Choose how many random Toyboxes you would like to see (Dropdown Menu)\n"
+            "2. Click on the button below and let the fun begin! 🎲"
+        ),
+        color=discord.Color.red()  # Optional: Embed-Farbe
+    )
+    
+    # Nachricht mit der interaktiven Ansicht senden
+    view = PlayView()
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=False)  # Nachricht für alle sichtbar
+
+
+
 
 # Bot starten
 if __name__ == "__main__":
