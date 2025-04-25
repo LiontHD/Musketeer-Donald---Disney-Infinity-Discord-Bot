@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+from discord import app_commands
 from discord.ui import Button, View
 import random
 import json
@@ -705,19 +706,6 @@ async def meta(interaction: discord.Interaction, ehr_file: discord.Attachment):
     except Exception as e:
         await interaction.response.send_message(f"An error occurred: {str(e)}", ephemeral=True)
 
-
-# Befehl zum zufälligen Abspielen einer bewerteten Toybox
-@bot.tree.command(name="play", description="Play a random rated toybox.")
-async def play_random_toybox(interaction: discord.Interaction):
-    if not channel_titles:
-        await interaction.response.send_message("No toyboxes have been rated yet.")
-        return
-
-    random_message_id = random.choice(list(channel_titles.keys()))
-    channel_title = channel_titles[random_message_id]
-
-    await interaction.response.send_message(f"Play this toybox: {channel_title}")
-
 # Admin-Befehl zum Starten der Bewertung in einem Kanal
 @bot.event
 async def on_ready():
@@ -765,6 +753,42 @@ async def rate(interaction: discord.Interaction):
     # Speichere den Titel des Kanals für den /play-Befehl
     channel_titles[message_id] = interaction.channel.name
     save_ratings()  # Speichere nach dem Hinzufügen des neuen Kanals
+
+# Forum-Kanal-ID hier eintragen
+forum_channel_id = 1253093395920851054  # Ersetze dies mit der tatsächlichen ID deines Forum-Kanals
+
+@bot.tree.command(
+    name="play",
+    description="Play a randomly selected Toybox"
+)
+@app_commands.describe(count="Number of Toyboxes to select (1-20)")
+async def random_thread(interaction: discord.Interaction, count: int = 1):
+    # Begrenzung der Anzahl auf 1 bis 20
+    if count < 1 or count > 20:
+        await interaction.response.send_message("Please enter a number between 1 and 20.", ephemeral=True)
+        return
+
+    # Forum-Kanal abrufen
+    forum_channel = interaction.guild.get_channel(forum_channel_id)
+    if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
+        await interaction.response.send_message("Error: Forum channel not found!", ephemeral=True)
+        return
+    
+    # Alle Threads abrufen
+    threads = forum_channel.threads
+    if not threads:
+        await interaction.response.send_message("No toyboxes found.", ephemeral=True)
+        return
+    
+    # Zufällige Threads auswählen
+    selected_threads = random.sample(threads, min(count, len(threads)))
+    thread_links = '\n'.join(thread.jump_url for thread in selected_threads)
+    
+    # Nachricht anpassen
+    message_prefix = "Play this Toybox:" if len(selected_threads) == 1 else "Play these Toyboxes:"
+    
+    # Antwort senden
+    await interaction.response.send_message(f"{message_prefix}\n{thread_links}", ephemeral=True)
 
 # Bot starten
 if __name__ == "__main__":
