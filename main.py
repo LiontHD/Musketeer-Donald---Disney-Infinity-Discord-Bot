@@ -859,6 +859,35 @@ async def play_init(interaction: discord.Interaction):
     view = PlayView()
     await interaction.response.send_message(embed=embed, view=view, ephemeral=False)  # Nachricht für alle sichtbar
 
+@bot.tree.command(
+    name="top_of_the_week",
+    description="Get 7 random top threads of the week from the forum"
+)
+async def top_of_the_week(interaction: discord.Interaction):
+    # Forum-Kanal abrufen
+    forum_channel = interaction.guild.get_channel(forum_channel_id)
+    if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
+        await interaction.response.send_message("Error: Forum channel not found!", ephemeral=True)
+        return
+
+    # Alle Threads abrufen
+    threads = forum_channel.threads
+    if not threads:
+        await interaction.response.send_message("No threads found in the forum channel.", ephemeral=True)
+        return
+
+    # Zufällig 7 Threads auswählen
+    selected_threads = random.sample(threads, min(7, len(threads)))
+
+    # Nachrichtentext erstellen
+    message = "⭐ **TOP OF THE WEEK** ⭐\n\n"
+    emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣"]
+    
+    for idx, thread in enumerate(selected_threads):
+        message += f"{emojis[idx]} **{thread.name}**\n{thread.jump_url}\n\n"
+
+    # Nachricht senden
+    await interaction.response.send_message(message)
 
 
 
