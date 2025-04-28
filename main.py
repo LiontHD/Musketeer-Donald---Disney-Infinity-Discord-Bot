@@ -859,35 +859,67 @@ async def play_init(interaction: discord.Interaction):
     view = PlayView()
     await interaction.response.send_message(embed=embed, view=view, ephemeral=False)  # Nachricht für alle sichtbar
 
+BLACKLIST_FILE = "blacklisted_threads.json"
+
+def load_blacklist():
+    if os.path.exists(BLACKLIST_FILE):
+        with open(BLACKLIST_FILE, "r") as f:
+            return json.load(f)
+    return []
+
+def save_blacklist(blacklist):
+    with open(BLACKLIST_FILE, "w") as f:
+        json.dump(blacklist, f)
+
+blacklisted_threads = load_blacklist()
+
 @bot.tree.command(
     name="top_of_the_week",
     description="Get 7 random top threads of the week from the forum"
 )
 async def top_of_the_week(interaction: discord.Interaction):
-    # Forum-Kanal abrufen
     forum_channel = interaction.guild.get_channel(forum_channel_id)
     if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
         await interaction.response.send_message("Error: Forum channel not found!", ephemeral=True)
         return
 
-    # Alle Threads abrufen
-    threads = forum_channel.threads
+    threads = [thread for thread in forum_channel.threads if str(thread.id) not in blacklisted_threads]
     if not threads:
-        await interaction.response.send_message("No threads found in the forum channel.", ephemeral=True)
+        await interaction.response.send_message("No eligible threads found in the forum channel.", ephemeral=True)
         return
 
-    # Zufällig 7 Threads auswählen
     selected_threads = random.sample(threads, min(7, len(threads)))
-
-    # Nachrichtentext erstellen
     message = "⭐ **TOP OF THE WEEK** ⭐\n\n"
     emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣"]
     
     for idx, thread in enumerate(selected_threads):
         message += f"{emojis[idx]} **{thread.name}**\n{thread.jump_url}\n\n"
 
-    # Nachricht senden
     await interaction.response.send_message(message)
+
+@bot.tree.command(
+    name="blacklist_top_threads",
+    description="Blacklist or unblacklist threads by their ID"
+)
+@app_commands.describe(thread_id="The ID of the thread to blacklist or remove from blacklist (optional)")
+async def blacklist_top_threads(interaction: discord.Interaction, thread_id: str = None):
+    global blacklisted_threads
+    
+    # Falls kein Thread ID angegeben wurde, versuchen, den aktuellen Thread zu identifizieren
+    if thread_id is None:
+        if not isinstance(interaction.channel, discord.Thread):
+            await interaction.response.send_message("❌ You must provide a thread ID or use this command inside a thread.", ephemeral=True)
+            return
+        thread_id = str(interaction.channel.id)
+    
+    if thread_id in blacklisted_threads:
+        blacklisted_threads.remove(thread_id)
+        save_blacklist(blacklisted_threads)
+        await interaction.response.send_message(f"✅ Removed thread `{thread_id}` from blacklist.", ephemeral=True)
+    else:
+        blacklisted_threads.append(thread_id)
+        save_blacklist(blacklisted_threads)
+        await interaction.response.send_message(f"❌ Added thread `{thread_id}` to blacklist.", ephemeral=True)
 
 
 
