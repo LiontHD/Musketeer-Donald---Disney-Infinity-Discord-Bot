@@ -922,6 +922,85 @@ async def blacklist_top_threads(interaction: discord.Interaction, thread_id: str
         await interaction.response.send_message(f"❌ Added thread `{thread_id}` to blacklist.", ephemeral=True)
 
 
+@bot.tree.command(
+    name="creator",
+    description="Search for all Toybox threads by a specific creator"
+)
+async def creator_search(interaction: discord.Interaction, creator_name: str):
+    # Interaktion aktiv halten
+    await interaction.response.defer(thinking=True)
+
+    # Forum-Kanal abrufen
+    forum_channel = interaction.guild.get_channel(forum_channel_id)
+    if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
+        await interaction.followup.send("Error: Forum channel not found!", ephemeral=True)
+        return
+
+    # Threads abrufen
+    print("Fetching threads...")
+    threads = list(forum_channel.threads[:50])  # Begrenzung auf 50 aktive Threads
+    archived_threads = []
+    async for thread in forum_channel.archived_threads(limit=50):  # Begrenzung auf 50 archivierte Threads
+        print(f"Found archived thread: {thread.name}")
+        archived_threads.append(thread)
+    threads.extend(archived_threads)
+
+    print(f"Total threads fetched: {len(threads)}")
+    if not threads:
+        await interaction.followup.send("No threads found in the forum channel.", ephemeral=True)
+        return
+
+    matching_threads = []
+    for thread in threads:
+        print(f"Processing thread: {thread.name}")
+        try:
+            # Erste Nachricht abrufen
+            first_message = await thread.fetch_message(thread.id)
+            print(f"Fetched message for thread: {thread.name}")
+
+            # Nachrichtentext prüfen
+            content = first_message.content
+            match = re.search(r"🎨 Creator:\s*(.+)", content)
+            if match:
+                extracted_creator = match.group(1).strip()
+                if creator_name.lower() in extracted_creator.lower():
+                    matching_threads.append(thread)
+        except discord.NotFound:
+            print(f"Message not found for thread: {thread.name}")
+        except discord.Forbidden:
+            print(f"Access forbidden for thread: {thread.name}")
+        except Exception as e:
+            print(f"Error processing thread {thread.name}: {e}")
+
+    if not matching_threads:
+        await interaction.followup.send(
+            f"No threads found for the creator: {creator_name}.",
+            ephemeral=True
+        )
+        return
+
+    # Ergebnisse anzeigen
+    embed = discord.Embed(
+        title=f"🎨 Threads by {creator_name}",
+        description=f"Here are all the threads by the creator '{creator_name}':",
+        color=discord.Color.blue()
+    )
+    for idx, thread in enumerate(matching_threads, start=1):
+        embed.add_field(
+            name=f"{idx}. {thread.name}",
+            value=f"[Jump to thread]({thread.jump_url})",
+            inline=False
+        )
+
+    print("Sending results...")
+    await interaction.followup.send(embed=embed)
+
+
+
+
+
+
+
 
 # Bot starten
 if __name__ == "__main__":
