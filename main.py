@@ -43,6 +43,13 @@ def load_ratings():
             }
             channel_titles = data.get('titles', {})
 
+async def update_toybox_database():
+    # Prüfe, ob die Datei existiert, erstelle sie ansonsten mit einer leeren Liste
+    if not os.path.exists(toybox_data_file):
+        with open(toybox_data_file, "w") as f:
+            json.dump([], f)
+
+
 def save_ratings():
     with open('ratings.json', 'w') as f:
         # Konvertiere alle IDs zurück zu Strings für die Speicherung
@@ -997,7 +1004,126 @@ async def creator_search(interaction: discord.Interaction, creator_name: str):
 
 
 
+toybox_data_file = "toybox_data.json"  # Lokale Datei für archivierte Threads
 
+# 📂 Funktion: Extrahiert Tags aus Thread-Nachrichten
+def extract_tags_from_messages(messages):
+    tags = set()
+    for msg in messages:
+        words = re.findall(r'\b\w{4,}\b', msg.content.lower())  # Extrahiere Wörter mit 4+ Buchstaben
+        tags.update(words)
+    return list(tags)[:10]  # Begrenze auf 10 Tags
+
+# 📂 Funktion: Speichert archivierte Threads mit Tags
+async def update_toybox_database():
+    guild = bot.guilds[0]  # Hauptserver des Bots
+    forum_channel = guild.get_channel(forum_channel_id)
+    if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
+        print("⚠️ Forum-Kanal nicht gefunden!")
+        return
+    
+    toybox_list = []
+    
+    # Alle Threads abrufen, inklusive archivierter
+    threads = list(forum_channel.threads)
+    async for archived_thread in forum_channel.archived_threads(limit=None):
+        threads.append(archived_thread)
+    
+    print(f"🔄 Aktualisiere die Toybox-Datenbank mit {len(threads)} Threads...")
+    
+    for thread in threads:
+        tags = [tag.name for tag in thread.applied_tags] if thread.applied_tags else []
+        
+        messages = []
+        async for msg in thread.history(limit=10):  # Letzte 10 Nachrichten abrufen
+            messages.append(msg)
+        
+        extracted_tags = extract_tags_from_messages(messages)
+        tags.extend(extracted_tags)
+        print(f"📝 Füge Tags zu Thread '{thread.name}' hinzu...")
+        
+        toybox_list.append({
+            "id": thread.id,
+            "name": thread.name,
+            "url": thread.jump_url,
+            "tags": list(set(tags))  # Doppelte Einträge vermeiden
+        })
+    
+    with open(toybox_data_file, "w") as f:
+        json.dump(toybox_list, f, indent=4)  # Schön formatiert für bessere Lesbarkeit
+    
+    print("✅ Toybox-Datenbank aktualisiert!")
+
+# 📂 Befehl: Manuelles Update der Toybox-Datenbank
+@bot.tree.command(name="update_toyboxes", description="Aktualisiert die Toybox-Datenbank manuell")
+async def update_toyboxes(interaction: discord.Interaction):
+    await update_toybox_database()
+    await interaction.response.send_message("✅ Toybox-Datenbank wurde aktualisiert!", ephemeral=True)
+
+# 📂 Suche nach archivierten Threads anhand von Namen oder Tags
+async def search_toyboxes(query):
+    try:
+        with open(toybox_data_file, "r") as f:
+            toybox_list = json.load(f)
+    except FileNotFoundError:
+        return []
+    
+    return [t for t in toybox_list if query.lower() in t["name"].lower() or query.lower() in [tag.lower() for tag in t["tags"]]]
+
+# 🤖 AI Toybox Advisor (Quiz-Funktion)
+@bot.tree.command(name="toybox_advisor", description="Empfiehlt eine Toybox basierend auf deinen Vorlieben")
+async def toybox_advisor(interaction: discord.Interaction):
+    view = discord.ui.View()
+    
+    async def callback(interaction, selection):
+        results = await search_toyboxes(selection)
+        if results:
+            msg = "🎮 **Empfohlene Toyboxes:**\n"
+            for toybox in results[:5]:
+                msg += f"🔹 [{toybox['name']}]({toybox['url']})\n"
+        else:
+            msg = "⚠️ Keine passende Toybox gefunden! Versuche eine andere Auswahl."
+        
+        await interaction.response.edit_message(content=msg, view=None)
+    
+    options = [
+        discord.SelectOption(label="Action", value="Action"),
+        discord.SelectOption(label="Racing", value="Racing"),
+        discord.SelectOption(label="Story", value="Story"),
+        discord.SelectOption(label="Sandbox", value="Sandbox")
+    ]
+    select = discord.ui.Select(placeholder="Welche Art von Toybox suchst du?", options=options)
+    select.callback = lambda i: callback(i, select.values[0])
+    view.add_item(select)
+    
+    await interaction.response.send_message("🤖 Wähle deine bevorzugte Toybox-Erfahrung:", view=view)
+
+# 🌌 Interaktive Auswahl mit Buttons & Dropdowns
+@bot.tree.command(name="toybox_finder", description="Finde Toyboxes mit Filtern und Kategorien")
+async def toybox_finder(interaction: discord.Interaction):
+    view = discord.ui.View()
+    
+    async def category_callback(interaction, category):
+        results = await search_toyboxes(category)
+        msg = "🎮 **Gefundene Toyboxes:**\n"
+        for toybox in results[:5]:
+            msg += f"🔹 [{toybox['name']}]({toybox['url']})\n"
+        
+        await interaction.response.edit_message(content=msg, view=None)
+    
+    categories = ["Disney", "Pixar", "Marvel", "Star Wars"]
+    for cat in categories:
+        button = discord.ui.Button(label=cat, style=discord.ButtonStyle.primary)
+        button.callback = lambda i, c=cat: category_callback(i, c)
+        view.add_item(button)
+    
+    await interaction.response.send_message("🌌 Wähle ein Universum:", view=view)
+
+# 🚀 Update ausführen, wenn der Bot startet
+@bot.event
+async def on_ready():
+    print(f"✅ Eingeloggt als {bot.user}")
+    await update_toybox_database()
 
 
 
