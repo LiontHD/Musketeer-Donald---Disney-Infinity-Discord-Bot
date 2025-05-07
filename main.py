@@ -714,30 +714,6 @@ async def meta(interaction: discord.Interaction, ehr_file: discord.Attachment):
         await interaction.response.send_message(f"An error occurred: {str(e)}", ephemeral=True)
 
 # Admin-Befehl zum Starten der Bewertung in einem Kanal
-@bot.event
-async def on_ready():
-    print(f"Bot {bot.user} is online.")
-    
-    # Setze den Status des Bots auf "Playing Disney Infinity"
-    await bot.change_presence(activity=discord.Game(name="Community Toyboxes"))
-
-    # Lade die gespeicherten Bewertungen, wenn der Bot startet
-    load_ratings()
-
-    # Registriere Views für alle Nachrichten, die Bewertungen haben
-    for message_id in message_ratings.keys():
-        bot.add_view(RatingView(message_id))
-
-    # Befehle synchronisieren, um sicherzustellen, dass Slash-Befehle registriert sind
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)")
-
-        # Registriert die Persistente View
-        bot.add_view(PlayView())
-        print("Persistent views registered successfully.")
-    except Exception as e:
-        print(f"Error syncing commands: {e}")
 
 # Slash-Befehl registrieren, um die Bewertung in einem Kanal zu starten
 @bot.tree.command(name="rate", description="Create a Toybox rating with stars.")
@@ -1122,7 +1098,28 @@ async def toybox_finder(interaction: discord.Interaction):
 # 🚀 Update ausführen, wenn der Bot startet
 @bot.event
 async def on_ready():
-    print(f"✅ Eingeloggt als {bot.user}")
+    print(f"Bot {bot.user} is online.")
+    
+    # Setze den Status des Bots auf "Playing Disney Infinity"
+    await bot.change_presence(activity=discord.Game(name="Community Toyboxes"))
+
+    # Lade die gespeicherten Bewertungen, wenn der Bot startet
+    load_ratings()
+
+    # Registriere Views für alle Nachrichten, die Bewertungen haben
+    for message_id in message_ratings.keys():
+        bot.add_view(RatingView(message_id))
+
+    # Befehle synchronisieren, um sicherzustellen, dass Slash-Befehle registriert sind
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} command(s)")
+
+        # Registriert die Persistente View
+        bot.add_view(PlayView())
+        print("Persistent views registered successfully.")
+    except Exception as e:
+        print(f"Error syncing commands: {e}")
     await update_toybox_database()
 
 
