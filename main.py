@@ -12,11 +12,11 @@ import re
 import math
 import zlib
 import tempfile
-
-from typing import List, Dict, Set
 from difflib import SequenceMatcher
 import networkx as nx
 from thefuzz import fuzz
+from discord import ForumChannel
+from typing import List, Dict
 
 # Discord Bot Token
 TOKEN = 'MTI4OTk1MzMwMzU2Mzg2NjIwNg.GVdTII.BOK5_lAc0bWXOB7e4YruJETaY9IssdMf73Ixe4'  # Bitte Token sicher aufbewahren
@@ -1010,193 +1010,50 @@ async def creator_search(interaction: discord.Interaction, creator_name: str):
 
 
 
-
-
-
-
-
-
-
-
 toybox_data_file = "toybox_data.json"
 
-class CharacterTagManager:
-    def __init__(self, filename: str = "data/character+tags.txt"):
-        self.character_tags = {}
-        self.load_character_tags(filename)
-    
-    def load_character_tags(self, filename: str):
-        """Load character tags from file with format:
-        - Character Name
-        Tag 1
-        Tag 2
-        Tag 3
-        
-        - Next Character
-        etc.
+class SimpleTagAnalyzer:
+    def analyze_text(self, text: str) -> list[str]:
         """
-        try:
-            with open(filename, 'r', encoding='utf-8') as f:
-                current_character = None
-                current_tags = []
-                
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                        
-                    if line.startswith('-'):
-                        # Save previous character if exists
-                        if current_character:
-                            self.character_tags[current_character] = current_tags
-                        
-                        # Start new character
-                        current_character = line[1:].strip()
-                        current_tags = []
-                    else:
-                        current_tags.append(line)
-                
-                # Save last character
-                if current_character:
-                    self.character_tags[current_character] = current_tags
-                    
-            print(f"✅ Loaded tags for {len(self.character_tags)} characters")
-        except FileNotFoundError:
-            print(f"⚠️ Warning: {filename} not found!")
-    
-    def get_related_characters(self, character: str) -> Set[str]:
-        """Find characters that share tags with the given character"""
-        if character not in self.character_tags:
-            return set()
-            
-        character_tag_set = set(self.character_tags[character])
-        related_characters = set()
-        
-        for other_char, other_tags in self.character_tags.items():
-            if other_char == character:
-                continue
-                
-            # Convert other tags to set for intersection
-            other_tag_set = set(other_tags)
-            
-            # If there's significant tag overlap, consider characters related
-            if len(character_tag_set.intersection(other_tag_set)) >= 3:  # Adjust threshold as needed
-                related_characters.add(other_char)
-                
-        return related_characters
-    
-    def get_character_tags(self, character: str) -> Set[str]:
-        """Get all tags associated with a character"""
-        return set(self.character_tags.get(character, []))
-
-class TagCategory:
-    def __init__(self, name: str, filename: str):
-        self.name = name
-        self.options: Set[str] = set()
-        self.load_options(filename)
-    
-    def load_options(self, filename: str):
-        try:
-            with open(filename, 'r', encoding='utf-8') as f:
-                self.options = {
-                    line.strip() 
-                    for line in f 
-                    if line.strip() and not line.strip().startswith('#')
-                }
-                print(f"✅ Loaded {len(self.options)} options for {self.name}")
-        except FileNotFoundError:
-            print(f"⚠️ Warning: {filename} not found!")
-            self.options = set()
-    
-    def find_matches(self, text: str) -> Set[str]:
-        """More precise matching algorithm"""
+        Analyzes text and returns matching franchise tags.
+        Returns "Other" if no franchise tags are found.
+        """
         text = text.lower()
-        matches = set()
+        tags = []
         
-        # Split text into words and word pairs
-        words = text.split()
-        word_pairs = [' '.join(words[i:i+2]) for i in range(len(words)-1)]
-        
-        for option in self.options:
-            option_lower = option.lower()
+        # Check for each franchise
+        if "disney" in text:
+            tags.append("Disney")
+        if "marvel" in text:
+            tags.append("Marvel")
+        if "star wars" in text or "starwars" in text:
+            tags.append("Star Wars")
             
-            # Exact match
-            if option_lower in text:
-                matches.add(option)
-                continue
+        # If no tags were found, add "Other"
+        if not tags:
+            tags.append("Other")
             
-            # Check for word boundary matches
-            if any(
-                word == option_lower or 
-                word_pair == option_lower 
-                for word in words
-                for word_pair in word_pairs
-            ):
-                matches.add(option)
-                
-        return matches
+        return tags
 
-class ThreadAnalyzer:
+class Bot(commands.Bot):
     def __init__(self):
-        print("🔄 Initializing Thread Analyzer...")
-        self.categories = {
-            'characters': TagCategory('Characters', 'data/characters.txt'),
-            'movies': TagCategory('Movies/Series', 'data/movies.txt'),
-            'themes': TagCategory('Themes', 'data/themes.txt'),
-            'gameplay': TagCategory('Gameplay Types', 'data/gameplay.txt'),
-            'mood': TagCategory('Mood/Aesthetic', 'data/mood.txt'),
-            'custom': TagCategory('Custom/Crossover', 'data/custom.txt'),
-            'seasonal': TagCategory('Special Events', 'data/seasonal.txt')
-        }
-        self.character_manager = CharacterTagManager()
-        print("✅ Thread Analyzer initialized!")
-    
-    def analyze_text(self, text: str) -> Dict[str, Set[str]]:
-        """Analyzes text content and returns matching tags by category."""
-        results = {category: set() for category in self.categories.keys()}
+        intents = discord.Intents.default()
+        intents.message_content = True
+        super().__init__(command_prefix="/", intents=intents)
         
-        # First find direct character matches
-        character_matches = self.categories['characters'].find_matches(text)
-        results['characters'].update(character_matches)
-        
-        # For each found character, add their related characters and tags
-        for character in character_matches:
-            # Add related characters
-            related_chars = self.character_manager.get_related_characters(character)
-            results['characters'].update(related_chars)
-            
-            # Add character's associated tags
-            char_tags = self.character_manager.get_character_tags(character)
-            movies_tags = {tag for tag in char_tags if 'Star Wars' in tag}
-            results['movies'].update(movies_tags)
-            
-            # Add any franchise-specific tags
-            if any('Star Wars' in tag for tag in char_tags):
-                results['themes'].update({'Sci-Fi', 'Adventure'})
-        
-        # Process remaining categories
-        for category_name, category in self.categories.items():
-            if category_name != 'characters':  # Already handled characters
-                matches = category.find_matches(text)
-                results[category_name].update(matches)
-        
-        return results
+    async def setup_hook(self):
+        print("Bot is setting up...")
 
-
-
-
-
-
-
+bot = Bot()
 
 async def update_toybox_database():
     guild = bot.guilds[0]
     forum_channel = guild.get_channel(forum_channel_id)
-    if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
+    if not forum_channel or not isinstance(forum_channel, ForumChannel):
         print("⚠️ Forum channel not found!")
         return
     
-    analyzer = ThreadAnalyzer()
+    analyzer = SimpleTagAnalyzer()
     toybox_list = []
     
     threads = list(forum_channel.threads)
@@ -1217,29 +1074,17 @@ async def update_toybox_database():
             continue
         
         analysis_text = f"{thread.name} {first_message.content}"
-        tag_results = analyzer.analyze_text(analysis_text)
-        
-        all_tags = set()
-        for category_tags in tag_results.values():
-            all_tags.update(category_tags)
-        
-        if thread.applied_tags:
-            all_tags.update(tag.name for tag in thread.applied_tags)
+        tags = analyzer.analyze_text(analysis_text)
         
         toybox_entry = {
             "id": thread.id,
             "name": thread.name,
             "url": thread.jump_url,
-            "tags": list(all_tags),
-            "categories": {
-                cat: list(tags) 
-                for cat, tags in tag_results.items() 
-                if tags
-            }
+            "tags": tags
         }
         
         toybox_list.append(toybox_entry)
-        print(f"✅ Added tags to '{thread.name}': {len(all_tags)} tags")
+        print(f"✅ Added tags to '{thread.name}': {', '.join(tags)}")
     
     with open(toybox_data_file, "w", encoding='utf-8') as f:
         json.dump(toybox_list, f, indent=4, ensure_ascii=False)
@@ -1252,7 +1097,11 @@ async def update_toyboxes(interaction: discord.Interaction):
     await update_toybox_database()
     await interaction.followup.send("✅ Toybox database has been updated!", ephemeral=True)
 
-async def search_toyboxes(query: str, category: str = None) -> List[Dict]:
+async def search_toyboxes(query: str) -> List[Dict]:
+    """
+    Search for toyboxes based on a query string.
+    Returns matches based on name or tags.
+    """
     try:
         with open(toybox_data_file, "r", encoding='utf-8') as f:
             toybox_list = json.load(f)
@@ -1260,125 +1109,156 @@ async def search_toyboxes(query: str, category: str = None) -> List[Dict]:
         return []
     
     query = query.lower()
-    
-    if category:
-        return [
-            t for t in toybox_list 
-            if category in t.get("categories", {}) and 
-            any(query in tag.lower() for tag in t["categories"][category])
-        ]
-    else:
-        return [
-            t for t in toybox_list 
-            if query in t["name"].lower() or 
-            any(query in tag.lower() for tag in t["tags"])
-        ]
-
-@bot.tree.command(name="toybox_advisor", description="Get Toybox recommendations based on your preferences")
-async def toybox_advisor(interaction: discord.Interaction):
-    view = discord.ui.View(timeout=300)
-    
-    async def callback(interaction: discord.Interaction, selection: str):
-        results = await search_toyboxes(selection)
-        if results:
-            embed = discord.Embed(
-                title="🎮 Recommended Toyboxes",
-                color=discord.Color.blue()
-            )
-            
-            for toybox in results[:5]:
-                tags = toybox.get("categories", {}).get("related_tags", [])
-                tag_text = ", ".join(tags) if tags else "No tags"
-                embed.add_field(
-                    name=toybox["name"],
-                    value=f"🔗 [Link]({toybox['url']})\n📌 {tag_text}",
-                    inline=False
-                )
-        else:
-            embed = discord.Embed(
-                title="⚠️ No Results",
-                description="No matching Toybox found! Try another selection.",
-                color=discord.Color.red()
-            )
-        
-        await interaction.response.edit_message(embed=embed, view=None)
-    
-    options = [
-        discord.SelectOption(label="Action & Adventure", value="Action",
-                           description="Action-packed Toyboxes with excitement"),
-        discord.SelectOption(label="Racing & Sports", value="Racing",
-                           description="Racing games and sports challenges"),
-        discord.SelectOption(label="Story & RPG", value="Story",
-                           description="Story-based experiences"),
-        discord.SelectOption(label="Sandbox & Creative", value="Sandbox",
-                           description="Free play and creative Toyboxes")
+    return [
+        t for t in toybox_list 
+        if query in t["name"].lower() or 
+        any(query in tag.lower() for tag in t["tags"])
     ]
-    
-    select = discord.ui.Select(
-        placeholder="What type of Toybox are you looking for?",
-        options=options,
-        custom_id="category_select"
-    )
-    select.callback = lambda i: callback(i, select.values[0])
-    view.add_item(select)
-    
-    await interaction.response.send_message(
-        embed=discord.Embed(
-            title="🤖 Toybox Advisor",
-            description="Choose your preferred Toybox experience:",
-            color=discord.Color.blue()
-        ),
-        view=view
-    )
 
-@bot.tree.command(name="toybox_finder", description="Find Toyboxes with filters and categories")
+@bot.tree.command(name="toybox_finder", description="Find Toyboxes by franchise")
 async def toybox_finder(interaction: discord.Interaction):
-    view = discord.ui.View(timeout=300)
-    
+    # Create the main view with category buttons
+    main_view = discord.ui.View(timeout=300)
+
+    # Define the category buttons
+    categories = [
+        ("Disney", "🏰"), ("Marvel", "🦸"),
+        ("Star Wars", "✨"), ("Other", "🎯")
+    ]
+
     async def category_callback(interaction: discord.Interaction, category: str):
         results = await search_toyboxes(category)
-        embed = discord.Embed(
-            title=f"🎮 {category} Toyboxes",
-            color=discord.Color.blue()
+        results.sort(key=lambda toybox: toybox['name'].lower())  # Sort alphabetically
+
+        items_per_page = 5
+        total_pages = max(1, (len(results) + items_per_page - 1) // items_per_page)  # Ensure at least 1 page
+        page = 0  # Current page index
+
+        # Create a new view for the pagination and page selection
+        view = discord.ui.View(timeout=300)
+
+        def create_embed(page):
+            embed = discord.Embed(
+                title=f"🎮 {category} Toyboxes (Page {page + 1} of {total_pages})",
+                color=discord.Color.blue()
+            )
+            if results:
+                embed.description = f"Found **{len(results)}** {category} Toyboxes"
+                start_index = page * items_per_page
+                end_index = start_index + items_per_page
+                toybox_page = results[start_index:end_index]
+
+                for toybox in toybox_page:
+                    embed.add_field(
+                        name=toybox["name"],
+                        value=f"🔗 [Link]({toybox['url']})\n📌 {', '.join(toybox['tags'])}",
+                        inline=False
+                    )
+            else:
+                embed.description = f"No Toyboxes found in the **{category}** category."
+
+            return embed
+
+        # Define navigation buttons
+        next_page_button = discord.ui.Button(label="Next", style=discord.ButtonStyle.primary)
+        prev_page_button = discord.ui.Button(label="Previous", style=discord.ButtonStyle.primary)
+        back_button = discord.ui.Button(label="Back to Categories", style=discord.ButtonStyle.secondary)
+
+        # Define the page selection dropdown
+        page_options = [
+            discord.SelectOption(label=f"Page {i + 1}", value=str(i))
+            for i in range(total_pages)
+        ]
+        page_select = discord.ui.Select(
+            placeholder="Jump to page...",
+            options=page_options,
+            min_values=1,
+            max_values=1
         )
-        
-        if results:
-            for toybox in results[:5]:
-                tags = toybox.get("categories", {}).get("related_tags", [])
-                tag_text = ", ".join(tags) if tags else "No tags"
-                embed.add_field(
-                    name=toybox["name"],
-                    value=f"🔗 [Link]({toybox['url']})\n📌 {tag_text}",
-                    inline=False
-                )
-        else:
-            embed.description = "No Toyboxes found in this category."
-        
-        await interaction.response.edit_message(embed=embed, view=None)
-    
-    categories = [
-        ("Disney", "🏰"), ("Pixar", "🎬"),
-        ("Marvel", "🦸"), ("Star Wars", "✨")
-    ]
-    
+
+        async def next_page_callback(interaction: discord.Interaction):
+            nonlocal page
+            if (page + 1) < total_pages:
+                page += 1
+                update_components()
+                await interaction.response.edit_message(embed=create_embed(page), view=view)
+            else:
+                await interaction.response.defer()
+
+        async def prev_page_callback(interaction: discord.Interaction):
+            nonlocal page
+            if page > 0:
+                page -= 1
+                update_components()
+                await interaction.response.edit_message(embed=create_embed(page), view=view)
+            else:
+                await interaction.response.defer()
+
+        async def back_callback(interaction: discord.Interaction):
+            await interaction.response.edit_message(
+                embed=discord.Embed(
+                    title="🌌 Toybox Finder",
+                    description="Choose a universe:",
+                    color=discord.Color.blue()
+                ),
+                view=main_view
+            )
+
+        async def page_select_callback(interaction: discord.Interaction):
+            nonlocal page
+            selected_page = int(page_select.values[0])
+            page = selected_page
+            update_components()
+            await interaction.response.edit_message(embed=create_embed(page), view=view)
+
+        next_page_button.callback = next_page_callback
+        prev_page_button.callback = prev_page_callback
+        back_button.callback = back_callback
+        page_select.callback = page_select_callback
+
+        def update_components():
+            # Update button states
+            prev_page_button.disabled = page <= 0
+            next_page_button.disabled = page >= total_pages - 1
+
+            # Update select menu placeholder
+            page_select.placeholder = f"Page {page + 1} of {total_pages}"
+
+            # Update the selected option in the dropdown
+            for option in page_select.options:
+                option.default = (int(option.value) == page)
+
+        # Initial component state
+        update_components()
+
+        # Add components to the view
+        view.add_item(prev_page_button)
+        view.add_item(next_page_button)
+        view.add_item(back_button)
+        view.add_item(page_select)
+
+        # Send the initial message with the first page
+        embed = create_embed(page)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    # Define the main category buttons
     for cat, emoji in categories:
         button = discord.ui.Button(
             label=f"{emoji} {cat}",
-            style=discord.ButtonStyle.primary,
-            custom_id=f"category_{cat.lower()}"
+            style=discord.ButtonStyle.primary
         )
         button.callback = lambda i, c=cat: category_callback(i, c)
-        view.add_item(button)
-    
+        main_view.add_item(button)
+
+    # Send the initial message with the category selection
     await interaction.response.send_message(
         embed=discord.Embed(
             title="🌌 Toybox Finder",
             description="Choose a universe:",
             color=discord.Color.blue()
         ),
-        view=view
+        view=main_view
     )
-
 
 
 
