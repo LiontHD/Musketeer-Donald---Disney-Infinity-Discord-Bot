@@ -1010,10 +1010,11 @@ async def creator_search(interaction: discord.Interaction, creator_name: str):
 
 
 
+
 toybox_data_file = "toybox_data.json"
 
 class SimpleTagAnalyzer:
-    def analyze_text(self, text: str) -> list[str]:
+    def analyze_text(self, text: str) -> list:
         """
         Analyzes text and returns matching franchise tags.
         Returns "Other" if no franchise tags are found.
@@ -1043,11 +1044,12 @@ class Bot(commands.Bot):
         
     async def setup_hook(self):
         print("Bot is setting up...")
+        await bot.tree.sync()  # Sync the command tree to ensure all commands are registered
+        print("Command tree synced!")
 
 bot = Bot()
 
-async def update_toybox_database():
-    guild = bot.guilds[0]
+async def update_toybox_database(guild: discord.Guild):
     forum_channel = guild.get_channel(forum_channel_id)
     if not forum_channel or not isinstance(forum_channel, ForumChannel):
         print("⚠️ Forum channel not found!")
@@ -1068,6 +1070,7 @@ async def update_toybox_database():
         first_message = None
         async for msg in thread.history(oldest_first=True, limit=1):
             first_message = msg
+            break  # Only need the first message
         
         if not first_message:
             print(f"⚠️ No messages in thread: {thread.name}")
@@ -1094,12 +1097,12 @@ async def update_toybox_database():
 @bot.tree.command(name="update_toyboxes", description="Manually update the Toybox database")
 async def update_toyboxes(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
-    await update_toybox_database()
+    await update_toybox_database(interaction.guild)
     await interaction.followup.send("✅ Toybox database has been updated!", ephemeral=True)
 
 async def search_toyboxes(query: str) -> List[Dict]:
     """
-    Search for toyboxes based on a query string.
+    Searches for Toyboxes based on a query string.
     Returns matches based on name or tags.
     """
     try:
@@ -1114,6 +1117,13 @@ async def search_toyboxes(query: str) -> List[Dict]:
         if query in t["name"].lower() or 
         any(query in tag.lower() for tag in t["tags"])
     ]
+
+
+
+
+
+
+
 
 @bot.tree.command(name="toybox_finder", description="Find Toyboxes by franchise")
 async def toybox_finder(interaction: discord.Interaction):
