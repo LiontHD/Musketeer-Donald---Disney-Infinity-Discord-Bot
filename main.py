@@ -180,6 +180,102 @@ async def update_rating_embed(message, message_id):
 
     await message.edit(embed=embed, view=RatingView(message_id))
 
+
+toybox_data_file = "toybox_data.json"
+
+class SimpleTagAnalyzer:
+    def analyze_text(self, text: str) -> list:
+        """
+        Analyzes text and returns matching franchise tags.
+        Returns "Other" if no franchise tags are found.
+        """
+        text = text.lower()
+        tags = []
+        
+        # Check for each franchise
+        if "disney" in text:
+            tags.append("Disney")
+        if "marvel" in text:
+            tags.append("Marvel")
+        if "star wars" in text or "starwars" in text:
+            tags.append("Star Wars")
+            
+        # If no tags were found, add "Other"
+        if not tags:
+            tags.append("Other")
+            
+        return tags
+
+class Bot(commands.Bot):
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.message_content = True
+        super().__init__(command_prefix="/", intents=intents)
+        
+    async def setup_hook(self):
+        print("Bot is setting up...")
+
+bot = Bot()
+
+async def update_toybox_database(guild: discord.Guild):
+    forum_channel = guild.get_channel(forum_channel_id)
+    if not forum_channel or not isinstance(forum_channel, ForumChannel):
+        print("⚠️ Forum channel not found!")
+        return
+    
+    analyzer = SimpleTagAnalyzer()
+    toybox_list = []
+    
+    threads = list(forum_channel.threads)
+    async for archived_thread in forum_channel.archived_threads(limit=None):
+        threads.append(archived_thread)
+    
+    print(f"🔄 Updating Toybox database with {len(threads)} threads...")
+    
+    for thread in threads:
+        print(f"📝 Analyzing Thread: {thread.name}")
+        
+        first_message = None
+        async for msg in thread.history(oldest_first=True, limit=1):
+            first_message = msg
+            break  # Only need the first message
+        
+        if not first_message:
+            print(f"⚠️ No messages in thread: {thread.name}")
+            continue
+        
+        analysis_text = f"{thread.name} {first_message.content}"
+        tags = analyzer.analyze_text(analysis_text)
+        
+        toybox_entry = {
+            "id": thread.id,
+            "name": thread.name,
+            "url": thread.jump_url,
+            "tags": tags
+        }
+        
+        toybox_list.append(toybox_entry)
+        print(f"✅ Added tags to '{thread.name}': {', '.join(tags)}")
+    
+    with open(toybox_data_file, "w", encoding='utf-8') as f:
+        json.dump(toybox_list, f, indent=4, ensure_ascii=False)
+    
+    print("✅ Toybox database updated!")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # Befehl für JSON Datei
 @bot.tree.command(name="json", description="Send the current rating.json file.")
 async def send_json(interaction: discord.Interaction):
@@ -1011,88 +1107,8 @@ async def creator_search(interaction: discord.Interaction, creator_name: str):
 
 
 
-toybox_data_file = "toybox_data.json"
 
-class SimpleTagAnalyzer:
-    def analyze_text(self, text: str) -> list:
-        """
-        Analyzes text and returns matching franchise tags.
-        Returns "Other" if no franchise tags are found.
-        """
-        text = text.lower()
-        tags = []
-        
-        # Check for each franchise
-        if "disney" in text:
-            tags.append("Disney")
-        if "marvel" in text:
-            tags.append("Marvel")
-        if "star wars" in text or "starwars" in text:
-            tags.append("Star Wars")
-            
-        # If no tags were found, add "Other"
-        if not tags:
-            tags.append("Other")
-            
-        return tags
 
-class Bot(commands.Bot):
-    def __init__(self):
-        intents = discord.Intents.default()
-        intents.message_content = True
-        super().__init__(command_prefix="/", intents=intents)
-        
-    async def setup_hook(self):
-        print("Bot is setting up...")
-        await bot.tree.sync()  # Sync the command tree to ensure all commands are registered
-        print("Command tree synced!")
-
-bot = Bot()
-
-async def update_toybox_database(guild: discord.Guild):
-    forum_channel = guild.get_channel(forum_channel_id)
-    if not forum_channel or not isinstance(forum_channel, ForumChannel):
-        print("⚠️ Forum channel not found!")
-        return
-    
-    analyzer = SimpleTagAnalyzer()
-    toybox_list = []
-    
-    threads = list(forum_channel.threads)
-    async for archived_thread in forum_channel.archived_threads(limit=None):
-        threads.append(archived_thread)
-    
-    print(f"🔄 Updating Toybox database with {len(threads)} threads...")
-    
-    for thread in threads:
-        print(f"📝 Analyzing Thread: {thread.name}")
-        
-        first_message = None
-        async for msg in thread.history(oldest_first=True, limit=1):
-            first_message = msg
-            break  # Only need the first message
-        
-        if not first_message:
-            print(f"⚠️ No messages in thread: {thread.name}")
-            continue
-        
-        analysis_text = f"{thread.name} {first_message.content}"
-        tags = analyzer.analyze_text(analysis_text)
-        
-        toybox_entry = {
-            "id": thread.id,
-            "name": thread.name,
-            "url": thread.jump_url,
-            "tags": tags
-        }
-        
-        toybox_list.append(toybox_entry)
-        print(f"✅ Added tags to '{thread.name}': {', '.join(tags)}")
-    
-    with open(toybox_data_file, "w", encoding='utf-8') as f:
-        json.dump(toybox_list, f, indent=4, ensure_ascii=False)
-    
-    print("✅ Toybox database updated!")
 
 @bot.tree.command(name="update_toyboxes", description="Manually update the Toybox database")
 async def update_toyboxes(interaction: discord.Interaction):
@@ -1117,7 +1133,6 @@ async def search_toyboxes(query: str) -> List[Dict]:
         if query in t["name"].lower() or 
         any(query in tag.lower() for tag in t["tags"])
     ]
-
 
 
 
@@ -1273,9 +1288,38 @@ async def toybox_finder(interaction: discord.Interaction):
 
 
 
+
+
+
+
+
+
+
+# 🚀 Update ausführen, wenn der Bot startet
 @bot.event
 async def on_ready():
-    print(f"✅ Logged in as {bot.user}")
+    print(f"Bot {bot.user} is online.")
+    
+    # Setze den Status des Bots auf "Playing Disney Infinity"
+    await bot.change_presence(activity=discord.Game(name="Community Toyboxes"))
+
+    # Lade die gespeicherten Bewertungen, wenn der Bot startet
+    load_ratings()
+
+    # Registriere Views für alle Nachrichten, die Bewertungen haben
+    for message_id in message_ratings.keys():
+        bot.add_view(RatingView(message_id))
+
+    # Befehle synchronisieren, um sicherzustellen, dass Slash-Befehle registriert sind
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} command(s)")
+
+        # Registriert die Persistente View
+        bot.add_view(PlayView())
+        print("Persistent views registered successfully.")
+    except Exception as e:
+        print(f"Error syncing commands: {e}")
     await update_toybox_database()
 
 
