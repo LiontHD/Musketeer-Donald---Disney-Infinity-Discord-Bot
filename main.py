@@ -1119,20 +1119,29 @@ async def update_toyboxes(interaction: discord.Interaction):
 async def search_toyboxes(query: str) -> List[Dict]:
     """
     Searches for Toyboxes based on a query string.
-    Returns matches based on name or tags.
+    Returns matches based on case-insensitive exact tag matches.
     """
     try:
         with open(toybox_data_file, "r", encoding='utf-8') as f:
             toybox_list = json.load(f)
     except FileNotFoundError:
+        print(f"Toybox data file not found!")
         return []
     
     query = query.lower()
-    return [
+    
+    # Debug logging
+    print(f"Searching for tag: '{query}'")
+    for toybox in toybox_list[:5]:  # Print first 5 toyboxes for debugging
+        print(f"Toybox tags: {toybox['tags']}")
+    
+    matches = [
         t for t in toybox_list 
-        if query in t["name"].lower() or 
-        any(query in tag.lower() for tag in t["tags"])
+        if any(tag.lower() == query for tag in t["tags"])
     ]
+    
+    print(f"Found {len(matches)} matches for '{query}'")
+    return matches
 
 
 
@@ -1153,72 +1162,11 @@ async def toybox_finder(interaction: discord.Interaction):
 
     async def category_callback(interaction: discord.Interaction, category: str):
         results = await search_toyboxes(category)
-        results.sort(key=lambda toybox: toybox['name'].lower())  # Sort alphabetically
-
-        items_per_page = 5
-        total_pages = max(1, (len(results) + items_per_page - 1) // items_per_page)  # Ensure at least 1 page
-        page = 0  # Current page index
-
-        # Create a new view for the pagination and page selection
+        
+        # Create base view with back button
         view = discord.ui.View(timeout=300)
-
-        def create_embed(page):
-            embed = discord.Embed(
-                title=f"🎮 {category} Toyboxes (Page {page + 1} of {total_pages})",
-                color=discord.Color.blue()
-            )
-            if results:
-                embed.description = f"Found **{len(results)}** {category} Toyboxes"
-                start_index = page * items_per_page
-                end_index = start_index + items_per_page
-                toybox_page = results[start_index:end_index]
-
-                for toybox in toybox_page:
-                    embed.add_field(
-                        name=toybox["name"],
-                        value=f"🔗 [Link]({toybox['url']})\n📌 {', '.join(toybox['tags'])}",
-                        inline=False
-                    )
-            else:
-                embed.description = f"No Toyboxes found in the **{category}** category."
-
-            return embed
-
-        # Define navigation buttons
-        next_page_button = discord.ui.Button(label="Next", style=discord.ButtonStyle.primary)
-        prev_page_button = discord.ui.Button(label="Previous", style=discord.ButtonStyle.primary)
         back_button = discord.ui.Button(label="Back to Categories", style=discord.ButtonStyle.secondary)
-
-        # Define the page selection dropdown
-        page_options = [
-            discord.SelectOption(label=f"Page {i + 1}", value=str(i))
-            for i in range(total_pages)
-        ]
-        page_select = discord.ui.Select(
-            placeholder="Jump to page...",
-            options=page_options,
-            min_values=1,
-            max_values=1
-        )
-
-        async def next_page_callback(interaction: discord.Interaction):
-            nonlocal page
-            if (page + 1) < total_pages:
-                page += 1
-                update_components()
-                await interaction.response.edit_message(embed=create_embed(page), view=view)
-            else:
-                await interaction.response.defer()
-
-        async def prev_page_callback(interaction: discord.Interaction):
-            nonlocal page
-            if page > 0:
-                page -= 1
-                update_components()
-                await interaction.response.edit_message(embed=create_embed(page), view=view)
-            else:
-                await interaction.response.defer()
-
+        
         async def back_callback(interaction: discord.Interaction):
             await interaction.response.edit_message(
                 embed=discord.Embed(
@@ -1228,54 +1176,95 @@ async def toybox_finder(interaction: discord.Interaction):
                 ),
                 view=main_view
             )
-
-        async def page_select_callback(interaction: discord.Interaction):
-            nonlocal page
-            selected_page = int(page_select.values[0])
-            page = selected_page
-            update_components()
-            await interaction.response.edit_message(embed=create_embed(page), view=view)
-
-        next_page_button.callback = next_page_callback
-        prev_page_button.callback = prev_page_callback
+        
         back_button.callback = back_callback
-        page_select.callback = page_select_callback
+        
+        # If no results, show empty state
+        if not results:
+            embed = discord.Embed(
+                title=f"🎮 {category} Toyboxes",
+                description=f"No Toyboxes found in the **{category}** category.",
+                color=discord.Color.blue()
+            )
+            view.add_item(back_button)
+            await interaction.response.edit_message(embed=embed, view=view)
+            return
+            
+        # If we have results, set up pagination
+        results.sort(key=lambda toybox: toybox['name'].lower())
+        items_per_page = 5
+        total_pages = max(1, (len(results) + items_per_page - 1) // items_per_page)
+        page = 0
 
-        def update_components():
-            # Update button states
-            prev_page_button.disabled = page <= 0
-            next_page_button.disabled = page >= total_pages - 1
+        def create_embed(page):
+            embed = discord.Embed(
+                title=f"🎮 {category} Toyboxes (Page {page + 1} of {total_pages})",
+                color=discord.Color.blue()
+            )
+            embed.description = f"Found **{len(results)}** {category} Toyboxes"
+            
+            start_index = page * items_per_page
+            end_index = min(start_index + items_per_page, len(results))
+            toybox_page = results[start_index:end_index]
 
-            # Update select menu placeholder
-            page_select.placeholder = f"Page {page + 1} of {total_pages}"
+            for toybox in toybox_page:
+                embed.add_field(
+                    name=toybox["name"],
+                    value=f"🔗 [Link]({toybox['url']})\n📌 {', '.join(toybox['tags'])}",
+                    inline=False
+                )
+            return embed
 
-            # Update the selected option in the dropdown
-            for option in page_select.options:
-                option.default = (int(option.value) == page)
+        # Add navigation only if more than one page
+        if total_pages > 1:
+            prev_button = discord.ui.Button(label="Previous", style=discord.ButtonStyle.primary)
+            next_button = discord.ui.Button(label="Next", style=discord.ButtonStyle.primary)
+            
+            async def prev_callback(interaction: discord.Interaction):
+                nonlocal page
+                if page > 0:
+                    page -= 1
+                    await interaction.response.edit_message(embed=create_embed(page), view=view)
+                else:
+                    await interaction.response.defer()
+                    
+            async def next_callback(interaction: discord.Interaction):
+                nonlocal page
+                if page < total_pages - 1:
+                    page += 1
+                    await interaction.response.edit_message(embed=create_embed(page), view=view)
+                else:
+                    await interaction.response.defer()
+                    
+            prev_button.callback = prev_callback
+            next_button.callback = next_callback
+            
+            view.add_item(prev_button)
+            view.add_item(next_button)
 
-        # Initial component state
-        update_components()
-
-        # Add components to the view
-        view.add_item(prev_page_button)
-        view.add_item(next_page_button)
+        # Add back button last
         view.add_item(back_button)
-        view.add_item(page_select)
 
-        # Send the initial message with the first page
+        # Send initial embed
         embed = create_embed(page)
         await interaction.response.edit_message(embed=embed, view=view)
 
-    # Define the main category buttons
+    # Set up category buttons
     for cat, emoji in categories:
         button = discord.ui.Button(
             label=f"{emoji} {cat}",
             style=discord.ButtonStyle.primary
         )
-        button.callback = lambda i, c=cat: category_callback(i, c)
+        
+        async def make_callback(category):
+            async def button_callback(interaction):
+                await category_callback(interaction, category)
+            return button_callback
+        
+        button.callback = await make_callback(cat)
         main_view.add_item(button)
 
-    # Send the initial message with the category selection
+    # Send initial category selection message
     await interaction.response.send_message(
         embed=discord.Embed(
             title="🌌 Toybox Finder",
