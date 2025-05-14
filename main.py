@@ -5,6 +5,7 @@ from discord.ui import Button, View
 import random
 import json
 import os
+from dotenv import load_dotenv
 import aiofiles
 import zipfile
 import io
@@ -19,11 +20,22 @@ from discord import ForumChannel
 from typing import List, Dict
 
 # Discord Bot Token
-TOKEN = 'MTI4OTk1MzMwMzU2Mzg2NjIwNg.GVdTII.BOK5_lAc0bWXOB7e4YruJETaY9IssdMf73Ixe4'  # Bitte Token sicher aufbewahren
+load_dotenv()  # lädt die Variablen aus der .env Datei
+TOKEN = os.getenv('BOT_TOKEN')
 
 # Bot-Einstellungen
 intents = discord.Intents.default()
 intents.message_content = True  # Stelle sicher, dass diese Intention gesetzt ist
+
+class PersistentView(discord.ui.View):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.persistent = True
+
+    async def on_timeout(self):
+        # Prevent the view from timing out
+        return
+
 
 bot = commands.Bot(command_prefix="/", intents=intents)
 
@@ -1150,9 +1162,10 @@ async def search_toyboxes(query: str) -> List[Dict]:
 
 
 @bot.tree.command(name="toybox_finder", description="Find Toyboxes by franchise")
+@commands.is_owner()
 async def toybox_finder(interaction: discord.Interaction):
     # Create the main view with category buttons
-    main_view = discord.ui.View(timeout=300)
+    main_view = PersistentView(timeout=None)
 
     # Define the category buttons
     categories = [
@@ -1164,7 +1177,7 @@ async def toybox_finder(interaction: discord.Interaction):
         results = await search_toyboxes(category)
         
         # Create base view with back button
-        view = discord.ui.View(timeout=300)
+        view = PersistentView(timeout=None)
         back_button = discord.ui.Button(label="Back to Categories", style=discord.ButtonStyle.secondary)
         
         async def back_callback(interaction: discord.Interaction):
@@ -1215,32 +1228,140 @@ async def toybox_finder(interaction: discord.Interaction):
                 )
             return embed
 
-        # Add navigation only if more than one page
+        # Add navigation buttons
+        prev_button = discord.ui.Button(label="Previous", style=discord.ButtonStyle.primary)
+        next_button = discord.ui.Button(label="Next", style=discord.ButtonStyle.primary)
+        prev_button.disabled = True
+        next_button.disabled = total_pages == 1
+
+        async def prev_callback(interaction: discord.Interaction):
+            nonlocal page
+            if page > 0:
+                page -= 1
+                next_button.disabled = False
+                prev_button.disabled = page == 0
+                if page_group_select:
+                    update_page_select_options(page)
+                update_page_select_placeholder()
+                await interaction.response.edit_message(embed=create_embed(page), view=view)
+            else:
+                await interaction.response.defer()
+                
+        async def next_callback(interaction: discord.Interaction):
+            nonlocal page
+            if page < total_pages - 1:
+                page += 1
+                prev_button.disabled = False
+                next_button.disabled = page == total_pages - 1
+                if page_group_select:
+                    update_page_select_options(page)
+                update_page_select_placeholder()
+                await interaction.response.edit_message(embed=create_embed(page), view=view)
+            else:
+                await interaction.response.defer()
+
+        prev_button.callback = prev_callback
+        next_button.callback = next_callback
+        view.add_item(prev_button)
+        view.add_item(next_button)
+
+        # Add page selection dropdown if there are multiple pages
+        page_select = None
+        page_group_select = None
+
+        def create_page_options(start_page, end_page):
+            return [
+                discord.SelectOption(
+                    label=f"Page {i + 1}",
+                    value=str(i),
+                    default=(i == page)
+                )
+                for i in range(start_page, min(end_page, total_pages))
+            ]
+
+        def update_page_select_placeholder():
+            if page_select:
+                page_select.placeholder = f"Page {page + 1}"
+            if page_group_select:
+                current_group = page // 25
+                page_group_select.placeholder = f"Pages {current_group * 25 + 1}-{min((current_group + 1) * 25, total_pages)}"
+
+        def update_page_select_options(current_page):
+            if page_select:
+                current_group = current_page // 25
+                start_page = current_group * 25
+                end_page = start_page + 25
+                page_select.options = create_page_options(start_page, end_page)
+
         if total_pages > 1:
-            prev_button = discord.ui.Button(label="Previous", style=discord.ButtonStyle.primary)
-            next_button = discord.ui.Button(label="Next", style=discord.ButtonStyle.primary)
-            
-            async def prev_callback(interaction: discord.Interaction):
-                nonlocal page
-                if page > 0:
-                    page -= 1
+            if total_pages <= 25:
+                # If 25 or fewer pages, use a single dropdown
+                page_select = discord.ui.Select(
+                    placeholder=f"Page 1 of {total_pages}",
+                    options=create_page_options(0, total_pages),
+                    min_values=1,
+                    max_values=1
+                )
+
+                async def page_select_callback(interaction: discord.Interaction):
+                    nonlocal page
+                    page = int(page_select.values[0])
+                    prev_button.disabled = page == 0
+                    next_button.disabled = page == total_pages - 1
+                    update_page_select_placeholder()
                     await interaction.response.edit_message(embed=create_embed(page), view=view)
-                else:
-                    await interaction.response.defer()
-                    
-            async def next_callback(interaction: discord.Interaction):
-                nonlocal page
-                if page < total_pages - 1:
-                    page += 1
+
+                page_select.callback = page_select_callback
+                view.add_item(page_select)
+            else:
+                # If more than 25 pages, use page group navigation
+                total_groups = (total_pages + 24) // 25
+                group_options = []
+                for i in range(total_groups):
+                    start_page = i * 25 + 1
+                    end_page = min((i + 1) * 25, total_pages)
+                    group_options.append(
+                        discord.SelectOption(
+                            label=f"Pages {start_page}-{end_page}",
+                            value=str(i),
+                            default=(i == 0)
+                        )
+                    )
+
+                page_group_select = discord.ui.Select(
+                    placeholder=f"Pages 1-25",
+                    options=group_options,
+                    min_values=1,
+                    max_values=1
+                )
+
+                page_select = discord.ui.Select(
+                    placeholder="Page 1",
+                    options=create_page_options(0, 25),
+                    min_values=1,
+                    max_values=1
+                )
+
+                async def group_select_callback(interaction: discord.Interaction):
+                    group_index = int(page_group_select.values[0])
+                    start_page = group_index * 25
+                    end_page = start_page + 25
+                    page_select.options = create_page_options(start_page, end_page)
+                    update_page_select_placeholder()
                     await interaction.response.edit_message(embed=create_embed(page), view=view)
-                else:
-                    await interaction.response.defer()
-                    
-            prev_button.callback = prev_callback
-            next_button.callback = next_callback
-            
-            view.add_item(prev_button)
-            view.add_item(next_button)
+
+                async def page_select_callback(interaction: discord.Interaction):
+                    nonlocal page
+                    page = int(page_select.values[0])
+                    prev_button.disabled = page == 0
+                    next_button.disabled = page == total_pages - 1
+                    update_page_select_placeholder()
+                    await interaction.response.edit_message(embed=create_embed(page), view=view)
+
+                page_group_select.callback = group_select_callback
+                page_select.callback = page_select_callback
+                view.add_item(page_group_select)
+                view.add_item(page_select)
 
         # Add back button last
         view.add_item(back_button)
@@ -1279,15 +1400,12 @@ async def toybox_finder(interaction: discord.Interaction):
 
 
 
-
-
-
-
-
 # 🚀 Update ausführen, wenn der Bot startet
 @bot.event
 async def on_ready():
-    print(f"Bot {bot.user} is online.")
+    # Add any existing views here
+    bot.add_view(PersistentView(timeout=None))
+    print(f'Bot is ready! Logged in as {bot.user.name}')
     
     # Setze den Status des Bots auf "Playing Disney Infinity"
     await bot.change_presence(activity=discord.Game(name="Community Toyboxes"))
