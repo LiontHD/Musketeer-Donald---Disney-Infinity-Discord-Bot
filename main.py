@@ -288,19 +288,66 @@ async def update_toybox_database(guild: discord.Guild):
 
 
 
-# Befehl für JSON Datei
-@bot.tree.command(name="json", description="Send the current rating.json file.")
-async def send_json(interaction: discord.Interaction):
-    # Pfad zur JSON-Datei
-    file_path = "ratings.json"
+@bot.tree.command(
+    name="json", 
+    description="Send the specified JSON file(s)"
+)
+@app_commands.choices(file_type=[
+    app_commands.Choice(name="All Files", value="all"),
+    app_commands.Choice(name="Ratings", value="ratings"),
+    app_commands.Choice(name="Toybox Data", value="toybox"),
+    app_commands.Choice(name="Blacklisted Threads", value="blacklist")
+])
+async def send_json(interaction: discord.Interaction, file_type: app_commands.Choice[str]):
+    # Define file paths
+    files = {
+        "ratings": "ratings.json",
+        "toybox": "toybox_data.json",
+        "blacklist": "blacklisted_threads.json"
+    }
     
-    # Überprüfe, ob die Datei existiert
-    if os.path.exists(file_path):
-        # Datei als Anhang senden
-        await interaction.response.send_message("Here is the current `ratings.json` file:", file=discord.File(file_path))
-    else:
-        # Fehlermeldung, falls die Datei nicht existiert
-        await interaction.response.send_message("The `ratings.json` file does not exist.", ephemeral=True)
+    try:
+        if file_type.value == "all":
+            # Create list to store existing files
+            file_attachments = []
+            missing_files = []
+            
+            # Check each file
+            for file_path in files.values():
+                if os.path.exists(file_path):
+                    file_attachments.append(discord.File(file_path))
+                else:
+                    missing_files.append(file_path)
+            
+            if file_attachments:
+                # Send existing files
+                message = "Here are the current JSON files:"
+                if missing_files:
+                    message += f"\n⚠️ Note: Could not find: {', '.join(missing_files)}"
+                await interaction.response.send_message(message, files=file_attachments)
+            else:
+                await interaction.response.send_message("❌ No JSON files found.", ephemeral=True)
+                
+        else:
+            # Handle single file request
+            file_path = files[file_type.value]
+            
+            if os.path.exists(file_path):
+                await interaction.response.send_message(
+                    f"Here is the current `{file_path}` file:",
+                    file=discord.File(file_path)
+                )
+            else:
+                await interaction.response.send_message(
+                    f"❌ The `{file_path}` file does not exist.",
+                    ephemeral=True
+                )
+                
+    except Exception as e:
+        await interaction.response.send_message(
+            f"❌ An error occurred: {str(e)}",
+            ephemeral=True
+        )
 
 # Fügt den Befehl /user hinzu, um Bewertungen für eine bestimmte Nachricht anzuzeigen
 @bot.tree.command(name="user", description="List all user ratings for a specific message.")
