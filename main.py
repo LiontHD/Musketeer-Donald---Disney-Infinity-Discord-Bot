@@ -19,6 +19,8 @@ from thefuzz import fuzz
 from discord import ForumChannel
 from typing import List, Dict
 
+
+
 # Discord Bot Token
 load_dotenv()  # lädt die Variablen aus der .env Datei
 TOKEN = os.getenv('BOT_TOKEN')
@@ -26,6 +28,51 @@ TOKEN = os.getenv('BOT_TOKEN')
 # Bot-Einstellungen
 intents = discord.Intents.default()
 intents.message_content = True  # Stelle sicher, dass diese Intention gesetzt ist
+
+# First, add these class definitions at the top level of your file
+class ToyboxCounter:
+    def __init__(self):
+        self.counting_sessions = {}
+        
+    def count_srr_files(self, zip_data: bytes, filename: str) -> int:
+        count = 0
+        with zipfile.ZipFile(io.BytesIO(zip_data)) as zip_ref:
+            file_list = zip_ref.namelist()
+            for file in file_list:
+                if re.match(r'.*SRR\d+[A-Z].*', file):
+                    count += 1
+        return count
+
+class EndCountingButton(Button):
+    def __init__(self, counter: ToyboxCounter, user_id: int):
+        super().__init__(label="End Counting", style=discord.ButtonStyle.danger)
+        self.counter = counter
+        self.user_id = user_id
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This button is not for you!", ephemeral=True)
+            return
+
+        session_data = self.counter.counting_sessions.pop(self.user_id, [])
+        if not session_data:
+            await interaction.response.send_message("No counting session found.", ephemeral=True)
+            return
+
+        total = sum(count for _, count in session_data)
+        summary = "**Session Summary:**\n"
+        for filename, count in session_data:
+            summary += f"{filename} - Counted {count} Toybox{'es' if count != 1 else ''}\n"
+        summary += f"\n**TOTAL: {total} Toybox{'es' if total != 1 else ''}**"
+
+        await interaction.response.send_message(summary)
+        self.view.stop()
+
+class CountingView(View):
+    def __init__(self, counter: ToyboxCounter, user_id: int):
+        super().__init__(timeout=None)
+        self.add_item(EndCountingButton(counter, user_id))
+
 
 class PersistentView(discord.ui.View):
     def __init__(self, *args, **kwargs):
@@ -42,6 +89,7 @@ bot = commands.Bot(command_prefix="/", intents=intents)
 # Globale Variablen für nachrichten-spezifische Bewertungen
 message_ratings = {}  # Ein Dictionary, um die Bewertungen pro Nachricht zu speichern
 channel_titles = {}  # Speichert die Titel der Kanäle für den /play-Befehl
+counter = ToyboxCounter()
 
 # Funktion zum Laden und Speichern von Bewertungen
 # Funktion zum Laden und Speichern von Bewertungen
@@ -279,7 +327,19 @@ async def update_toybox_database(guild: discord.Guild):
 
 
 
-
+@bot.tree.command(
+    name="count_publish",
+    description="Start counting toyboxes from ZIP files"
+)
+async def count_publish(interaction: discord.Interaction):
+    user_id = interaction.user.id
+    counter.counting_sessions[user_id] = []
+    
+    view = CountingView(counter, user_id)
+    await interaction.response.send_message(
+        "Counting session started! Upload ZIP files to count toyboxes. Use the button below to end the session.",
+        view=view
+    )
 
 
 
@@ -1007,6 +1067,26 @@ class PlayView(discord.ui.View):
         await interaction.message.edit(view=self)
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 @bot.tree.command(
     name="play_init",
     description="Start an interactive Toybox randomizer"
@@ -1443,7 +1523,25 @@ async def toybox_finder(interaction: discord.Interaction):
     )
 
 
+@bot.event
+async def on_message(message):
+    await bot.process_commands(message)  # Keep this if you have prefix commands
+    
+    if message.author.bot:
+        return
 
+    if message.author.id not in counter.counting_sessions:
+        return
+
+    for attachment in message.attachments:
+        if attachment.filename.endswith('.zip'):
+            zip_data = await attachment.read()
+            count = counter.count_srr_files(zip_data, attachment.filename)
+            
+            counter.counting_sessions[message.author.id].append((attachment.filename, count))
+            total = sum(count for _, count in counter.counting_sessions[message.author.id])
+            
+            await message.channel.send(f"{total} Toybox{'es' if total != 1 else ''}")
 
 
 
