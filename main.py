@@ -39,7 +39,10 @@ class ToyboxCounter:
         with zipfile.ZipFile(io.BytesIO(zip_data)) as zip_ref:
             file_list = zip_ref.namelist()
             for file in file_list:
-                if re.match(r'.*SRR\d+[A-Z].*', file):
+                # Get just the filename without the path
+                base_name = os.path.basename(file)
+                # Match only files that start with 'SRR' followed by numbers and a letter
+                if re.match(r'^SRR\d+[A-Z]', base_name):
                     count += 1
         return count
 
@@ -60,7 +63,7 @@ class EndCountingButton(Button):
             return
 
         total = sum(count for _, count in session_data)
-        summary = "**Session Summary:**\n"
+        summary = "**Toyboxes Counted:**\n"
         for filename, count in session_data:
             summary += f"{filename} - Counted {count} Toybox{'es' if count != 1 else ''}\n"
         summary += f"\n**TOTAL: {total} Toybox{'es' if total != 1 else ''}**"
