@@ -20,7 +20,6 @@ from discord import ForumChannel
 from typing import List, Dict
 
 
-
 # Discord Bot Token
 load_dotenv()  # lädt die Variablen aus der .env Datei
 TOKEN = os.getenv('BOT_TOKEN')
@@ -63,11 +62,14 @@ class EndCountingButton(Button):
             return
 
         total = sum(count for _, count in session_data)
-        summary = "**Toyboxes Counted:**\n"
+        summary = "```\n📊 Toybox Counting Session\n"
+        summary += "─────────────────────────────────\n"
         for filename, count in session_data:
-            summary += f"{filename} - Counted {count} Toybox{'es' if count != 1 else ''}\n"
-        summary += f"\n**TOTAL: {total} Toybox{'es' if total != 1 else ''}**"
+            summary += f"📂 {filename.ljust(35)} |  🎲 {count} Toybox{'es' if count != 1 else ''}\n"
 
+        summary += "─────────────────────────────────\n"
+        summary += f"🔢 TOTAL TOYBOXES: {total} 🎉\n```"
+        
         await interaction.response.send_message(summary)
         self.view.stop()
 
