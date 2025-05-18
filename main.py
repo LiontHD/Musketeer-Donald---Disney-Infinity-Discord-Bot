@@ -28,7 +28,6 @@ TOKEN = os.getenv('BOT_TOKEN')
 intents = discord.Intents.default()
 intents.message_content = True  # Stelle sicher, dass diese Intention gesetzt ist
 
-# First, add these class definitions at the top level of your file
 class ToyboxCounter:
     def __init__(self):
         self.counting_sessions = {}
@@ -38,9 +37,7 @@ class ToyboxCounter:
         with zipfile.ZipFile(io.BytesIO(zip_data)) as zip_ref:
             file_list = zip_ref.namelist()
             for file in file_list:
-                # Get just the filename without the path
                 base_name = os.path.basename(file)
-                # Match only files that start with 'SRR' followed by numbers and a letter
                 if re.match(r'^SRR\d+[A-Z]', base_name):
                     count += 1
         return count
@@ -62,15 +59,22 @@ class EndCountingButton(Button):
             return
 
         total = sum(count for _, count in session_data)
-        summary = "```\n📊 Toybox Counting Session\n"
-        summary += "─────────────────────────────────\n"
-        for filename, count in session_data:
-            summary += f"📂 {filename.ljust(35)} |  🎲 {count} Toybox{'es' if count != 1 else ''}\n"
 
-        summary += "─────────────────────────────────\n"
-        summary += f"🔢 TOTAL TOYBOXES: {total} 🎉\n```"
+        # Create Embed
+        embed = discord.Embed(title="🟢 Toybox Counting Session", color=discord.Color.green())
+        embed.set_footer(text="Toybox Count Bot | Powered by Magic ✨")
+
+        for filename, count in session_data:
+            embed.add_field(
+                name=f"📂 {filename}",
+                value=f"🎲 **{count}** Toybox{'es' if count != 1 else ''}",
+                inline=False
+            )
+
+        embed.add_field(name="🔢 TOTAL TOYBOXES", value=f"🎉 **{total}**", inline=False)
+
+        await interaction.response.send_message(embed=embed)
         
-        await interaction.response.send_message(summary)
         self.view.stop()
 
 class CountingView(View):
@@ -78,16 +82,13 @@ class CountingView(View):
         super().__init__(timeout=None)
         self.add_item(EndCountingButton(counter, user_id))
 
-
-class PersistentView(discord.ui.View):
+class PersistentView(View):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.persistent = True
 
     async def on_timeout(self):
-        # Prevent the view from timing out
-        return
-
+        return  # Prevents the view from timing out
 
 bot = commands.Bot(command_prefix="/", intents=intents)
 
