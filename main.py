@@ -60,21 +60,54 @@ class EndCountingButton(Button):
 
         total = sum(count for _, count in session_data)
 
-        # Create Embed
-        embed = discord.Embed(title="🟢 Toybox Counting Session", color=discord.Color.green())
-        embed.set_footer(text="Toybox Count Bot | Powered by Magic ✨")
+        # Create a more structured embed
+        embed = discord.Embed(
+            title="📊 Toybox Counting Results",
+            description="Summary of counted toyboxes in submitted files",
+            color=0x2ecc71  # Nice green color
+        )
+        
+        # Add a divider field
+        embed.add_field(
+            name="━━ File Details ━━",
+            value="",
+            inline=False
+        )
 
+        # Add individual file results
         for filename, count in session_data:
+            # Format filename to be more readable
+            formatted_filename = filename.replace('_', ' ').replace('.zip', '')
             embed.add_field(
-                name=f"📂 {filename}",
-                value=f"🎲 **{count}** Toybox{'es' if count != 1 else ''}",
+                name=f"📦 {formatted_filename}",
+                value=f"> Found `{count}` Toybox{'es' if count != 1 else ''}",
                 inline=False
             )
 
-        embed.add_field(name="🔢 TOTAL TOYBOXES", value=f"🎉 **{total}**", inline=False)
+        # Add a divider before total
+        embed.add_field(
+            name="━━ Summary ━━",
+            value="",
+            inline=False
+        )
+
+        # Add total with more emphasis
+        embed.add_field(
+            name="📈 Total Count",
+            value=f"```\n{total} Toybox{'es' if total != 1 else ''}\n```",
+            inline=False
+        )
+
+        # Add timestamp
+        embed.timestamp = discord.utils.utcnow()
+        
+        # Enhanced footer
+        embed.set_footer(
+            text="Toybox Count Bot | Session Complete ✨",
+            icon_url="https://cdn.discordapp.com/emojis/1039238467898613851.webp?size=96&quality=lossless" # Replace with your bot's avatar URL
+        )
 
         await interaction.response.send_message(embed=embed)
-        
         self.view.stop()
 
 class CountingView(View):
