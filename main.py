@@ -31,6 +31,7 @@ intents.message_content = True  # Stelle sicher, dass diese Intention gesetzt is
 class ToyboxCounter:
     def __init__(self):
         self.counting_sessions = {}
+        self.progress_messages = {}  # Store progress message IDs
         
     def count_srr_files(self, zip_data: bytes, filename: str) -> int:
         count = 0
@@ -111,9 +112,10 @@ class EndCountingButton(Button):
         self.view.stop()
 
 class CountingView(View):
-    def __init__(self, counter: ToyboxCounter, user_id: int):
+    def __init__(self, counter: ToyboxCounter, user_id: int, progress_message):
         super().__init__(timeout=None)
         self.add_item(EndCountingButton(counter, user_id))
+        self.progress_message = progress_message
 
 class PersistentView(View):
     def __init__(self, *args, **kwargs):
@@ -374,11 +376,22 @@ async def count_publish(interaction: discord.Interaction):
     user_id = interaction.user.id
     counter.counting_sessions[user_id] = []
     
-    view = CountingView(counter, user_id)
-    await interaction.response.send_message(
-        "Counting session started! Upload ZIP files to count toyboxes. Use the button below to end the session.",
-        view=view
+    # Create initial progress embed
+    progress_embed = discord.Embed(
+        title="📊 Toybox Counting Session",
+        description="Upload ZIP files to count toyboxes.\nCurrent progress will be shown here.",
+        color=0x3498db  # Nice blue color
     )
+    progress_embed.add_field(
+        name="Status",
+        value="Waiting for files...",
+        inline=False
+    )
+    
+    # Send initial message and store its reference
+    await interaction.response.send_message(embed=progress_embed, view=CountingView(counter, user_id, None))
+    original_message = await interaction.original_response()
+    counter.progress_messages[user_id] = original_message
 
 
 
@@ -1564,7 +1577,7 @@ async def toybox_finder(interaction: discord.Interaction):
 
 @bot.event
 async def on_message(message):
-    await bot.process_commands(message)  # Keep this if you have prefix commands
+    await bot.process_commands(message)
     
     if message.author.bot:
         return
@@ -1580,7 +1593,40 @@ async def on_message(message):
             counter.counting_sessions[message.author.id].append((attachment.filename, count))
             total = sum(count for _, count in counter.counting_sessions[message.author.id])
             
-            await message.channel.send(f"{total} Toybox{'es' if total != 1 else ''}")
+            # Update the progress embed
+            progress_embed = discord.Embed(
+                title="📊 Toybox Counting Session",
+                description="Upload ZIP files to count toyboxes.\nCurrent progress shown below.",
+                color=0x3498db
+            )
+            
+            # Add file details
+            file_list = ""
+            for fname, fcount in counter.counting_sessions[message.author.id]:
+                file_list += f"📦 {fname}: `{fcount}` Toybox{'es' if fcount != 1 else ''}\n"
+            
+            progress_embed.add_field(
+                name="Files Processed",
+                value=file_list or "No files processed yet",
+                inline=False
+            )
+            
+            progress_embed.add_field(
+                name="Current Total",
+                value=f"**{total}** Toybox{'es' if total != 1 else ''}",
+                inline=False
+            )
+            
+            # Update the progress message
+            progress_message = counter.progress_messages.get(message.author.id)
+            if progress_message:
+                await progress_message.edit(embed=progress_embed)
+            
+            # Delete the uploaded file message to reduce clutter
+            try:
+                await message.delete()
+            except:
+                pass  # Ignore if we can't delete the message
 
 
 
