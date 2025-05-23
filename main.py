@@ -28,6 +28,7 @@ TOKEN = os.getenv('BOT_TOKEN')
 intents = discord.Intents.default()
 intents.message_content = True  # Stelle sicher, dass diese Intention gesetzt ist
 
+
 class ToyboxCounter:
     def __init__(self):
         self.counting_sessions = {}
@@ -51,9 +52,9 @@ class EndCountingButton(Button):
 
     async def callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("This button is not for you!", ephemeral=True)
+            await interaction.response.send_message("You cannot end this session.", ephemeral=True)
             return
-
+        
         session_data = self.counter.counting_sessions.pop(self.user_id, [])
         if not session_data:
             await interaction.response.send_message("No counting session found.", ephemeral=True)
@@ -114,8 +115,8 @@ class EndCountingButton(Button):
 class CountingView(View):
     def __init__(self, counter: ToyboxCounter, user_id: int, progress_message):
         super().__init__(timeout=None)
-        self.add_item(EndCountingButton(counter, user_id))
         self.progress_message = progress_message
+        self.add_item(EndCountingButton(counter, user_id))
 
 class PersistentView(View):
     def __init__(self, *args, **kwargs):
@@ -380,7 +381,7 @@ async def count_publish(interaction: discord.Interaction):
     progress_embed = discord.Embed(
         title="📊 Toybox Counting Session",
         description="Upload ZIP files to count toyboxes.\nCurrent progress will be shown here.",
-        color=0x3498db  # Nice blue color
+        color=0x3498db
     )
     progress_embed.add_field(
         name="Status",
@@ -1584,49 +1585,56 @@ async def on_message(message):
 
     if message.author.id not in counter.counting_sessions:
         return
-
+    
+    processed_files = []
+    
     for attachment in message.attachments:
         if attachment.filename.endswith('.zip'):
             zip_data = await attachment.read()
             count = counter.count_srr_files(zip_data, attachment.filename)
             
-            counter.counting_sessions[message.author.id].append((attachment.filename, count))
-            total = sum(count for _, count in counter.counting_sessions[message.author.id])
-            
-            # Update the progress embed
-            progress_embed = discord.Embed(
-                title="📊 Toybox Counting Session",
-                description="Upload ZIP files to count toyboxes.\nCurrent progress shown below.",
-                color=0x3498db
-            )
-            
-            # Add file details
-            file_list = ""
-            for fname, fcount in counter.counting_sessions[message.author.id]:
-                file_list += f"📦 {fname}: `{fcount}` Toybox{'es' if fcount != 1 else ''}\n"
-            
-            progress_embed.add_field(
-                name="Files Processed",
-                value=file_list or "No files processed yet",
-                inline=False
-            )
-            
-            progress_embed.add_field(
-                name="Current Total",
-                value=f"**{total}** Toybox{'es' if total != 1 else ''}",
-                inline=False
-            )
-            
-            # Update the progress message
-            progress_message = counter.progress_messages.get(message.author.id)
-            if progress_message:
-                await progress_message.edit(embed=progress_embed)
-            
-            # Delete the uploaded file message to reduce clutter
+            counter.counting_sessions.setdefault(message.author.id, []).append((attachment.filename, count))
+            processed_files.append((attachment.filename, count))
+    
+    if processed_files:
+        total = sum(count for _, count in counter.counting_sessions[message.author.id])
+        
+        # Update the progress embed
+        progress_embed = discord.Embed(
+            title="📊 Toybox Counting Session",
+            description="Upload ZIP files to count toyboxes.\nCurrent progress shown below.",
+            color=0x3498db
+        )
+        
+        # Add file details
+        file_list = "\n".join(
+            f"📦 {fname}: `{fcount}` Toybox{'es' if fcount != 1 else ''}"
+            for fname, fcount in counter.counting_sessions[message.author.id]
+        )
+        
+        progress_embed.add_field(
+            name="Files Processed",
+            value=file_list or "No files processed yet",
+            inline=False
+        )
+        
+        progress_embed.add_field(
+            name="Current Total",
+            value=f"**{total}** Toybox{'es' if total != 1 else ''}",
+            inline=False
+        )
+        
+        # Update the progress message
+        progress_message = counter.progress_messages.get(message.author.id)
+        if progress_message:
+            await progress_message.edit(embed=progress_embed, view=CountingView(counter, message.author.id, progress_message))
+        
+        # Delete only if all attachments were ZIP files
+        if len(processed_files) == len(message.attachments):
             try:
                 await message.delete()
             except:
-                pass  # Ignore if we can't delete the message
+                pass
 
 
 
