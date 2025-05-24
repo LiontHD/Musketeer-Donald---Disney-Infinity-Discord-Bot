@@ -1599,29 +1599,50 @@ async def on_message(message):
     if processed_files:
         total = sum(count for _, count in counter.counting_sessions[message.author.id])
         
-        # Update the progress embed
+        # Updated progress embed with new design
         progress_embed = discord.Embed(
             title="📊 Toybox Counting Session",
             description="Upload ZIP files to count toyboxes.\nCurrent progress shown below.",
             color=0x3498db
         )
         
-        # Add file details
-        file_list = "\n".join(
-            f"📦 {fname}: `{fcount}` Toybox{'es' if fcount != 1 else ''}"
-            for fname, fcount in counter.counting_sessions[message.author.id]
-        )
-        
+        # Add divider before file details
         progress_embed.add_field(
-            name="Files Processed",
-            value=file_list or "No files processed yet",
+            name="━━ File Details ━━",
+            value="",
             inline=False
         )
         
+        # Add file details with new formatting
+        for fname, fcount in counter.counting_sessions[message.author.id]:
+            formatted_filename = fname.replace('_', ' ').replace('.zip', '')
+            progress_embed.add_field(
+                name=f"📦 {formatted_filename}",
+                value=f"> Found `{fcount}` Toybox{'es' if fcount != 1 else ''}",
+                inline=False
+            )
+        
+        # Add divider before total
         progress_embed.add_field(
-            name="Current Total",
-            value=f"**{total}** Toybox{'es' if total != 1 else ''}",
+            name="━━ Summary ━━",
+            value="",
             inline=False
+        )
+        
+        # Add total with code block formatting
+        progress_embed.add_field(
+            name="📈 Current Total",
+            value=f"```\n{total} Toybox{'es' if total != 1 else ''}\n```",
+            inline=False
+        )
+        
+        # Add timestamp
+        progress_embed.timestamp = discord.utils.utcnow()
+        
+        # Add enhanced footer
+        progress_embed.set_footer(
+            text="Toybox Count Bot | Session in Progress 🔄",
+            icon_url="https://cdn.discordapp.com/emojis/1039238467898613851.webp?size=96&quality=lossless"
         )
         
         # Update the progress message
