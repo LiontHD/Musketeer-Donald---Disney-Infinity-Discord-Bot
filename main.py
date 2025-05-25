@@ -45,10 +45,11 @@ class ToyboxCounter:
         return count
 
 class EndCountingButton(Button):
-    def __init__(self, counter: ToyboxCounter, user_id: int):
+    def __init__(self, counter: ToyboxCounter, user_id: int, progress_message: discord.Message):
         super().__init__(label="End Counting", style=discord.ButtonStyle.danger)
         self.counter = counter
         self.user_id = user_id
+        self.progress_message = progress_message  # Store the progress message reference
 
     async def callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
@@ -66,7 +67,7 @@ class EndCountingButton(Button):
         embed = discord.Embed(
             title="📊 Toybox Counting Results",
             description="Summary of counted toyboxes in submitted files",
-            color=0x2ecc71  # Nice green color
+            color=0x4ecca5
         )
         
         # Add a divider field
@@ -78,7 +79,6 @@ class EndCountingButton(Button):
 
         # Add individual file results
         for filename, count in session_data:
-            # Format filename to be more readable
             formatted_filename = filename.replace('_', ' ').replace('.zip', '')
             embed.add_field(
                 name=f"📦 {formatted_filename}",
@@ -106,17 +106,23 @@ class EndCountingButton(Button):
         # Enhanced footer
         embed.set_footer(
             text="Toybox Count Bot | Session Complete ✨",
-            icon_url="https://cdn.discordapp.com/emojis/1039238467898613851.webp?size=96&quality=lossless" # Replace with your bot's avatar URL
+            icon_url="https://cdn.discordapp.com/emojis/1039238467898613851.webp?size=96&quality=lossless"
         )
 
         await interaction.response.send_message(embed=embed)
+        
+        # Delete the progress message
+        try:
+            await self.progress_message.delete()
+        except discord.HTTPException:
+            pass  # Ignore any errors if message is already deleted
+            
         self.view.stop()
 
 class CountingView(View):
-    def __init__(self, counter: ToyboxCounter, user_id: int, progress_message):
-        super().__init__(timeout=None)
-        self.progress_message = progress_message
-        self.add_item(EndCountingButton(counter, user_id))
+    def __init__(self, counter: ToyboxCounter, user_id: int, progress_message: discord.Message):
+        super().__init__()
+        self.add_item(EndCountingButton(counter, user_id, progress_message))
 
 class PersistentView(View):
     def __init__(self, *args, **kwargs):
@@ -381,7 +387,7 @@ async def count_publish(interaction: discord.Interaction):
     progress_embed = discord.Embed(
         title="📊 Toybox Counting Session",
         description="Upload ZIP files to count toyboxes.\nCurrent progress will be shown here.",
-        color=0x3498db
+        color=0xec4e4e
     )
     progress_embed.add_field(
         name="Status",
@@ -1603,7 +1609,7 @@ async def on_message(message):
         progress_embed = discord.Embed(
             title="📊 Toybox Counting Session",
             description="Upload ZIP files to count toyboxes.\nCurrent progress shown below.",
-            color=0x3498db
+            color=0xdb6534
         )
         
         # Add divider before file details
