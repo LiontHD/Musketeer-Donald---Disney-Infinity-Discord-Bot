@@ -292,20 +292,243 @@ async def update_rating_embed(message, message_id):
 toybox_data_file = "toybox_data.json"
 
 class SimpleTagAnalyzer:
-    def analyze_text(self, text: str) -> list:
+    def __init__(self):
+        # Disney keywords including characters and movies
+        self.disney_keywords = {
+            # General Disney terms
+            "disney", "princess", "walt", "disneyland", "disney land", "disneyworld", "disney world",
+            
+            
+            
+            # Original list entries
+            "alice in wonderland", "alice", "mad hatter", "time",
+            "inside out", "joy", "sadness", "anger", "fear", "disgust", "inside-out",
+            "mulan", "fa mulan",
+            "aladdin", "jasmine", 
+            "nightmare before christmas", "jack skellington",
+            "pirates of the caribbean", "jack sparrow", "barbossa", "davy jones", "pirates",
+            "zootopia", "judy hopps", "nick wilde", "judy", "nick", "zoomania",
+            "wreck it ralph", "ralph", "vanellope", "wreck-it ralph", "fix-it felix", "hero's duty",
+            "big hero 6", "baymax", "hiro", 
+            "tron", "quorra", "sam flynn", "flynn", "grid",
+            "tinker bell", "peter pan", "neverland", "tinkerbell",
+            "maleficent", "sleeping beauty",
+            "incredibles", "mr incredible", "elastigirl", "dash", "violet", "syndrome",
+            "phineas and ferb", "phineas", "perry", "agent p", "ferb",
+            "lilo & stitch", "lilo and stitch", "stitch", "lilo",
+            "tangled", "rapunzel",
+            "jungle book", "baloo", "mowgli", "jungle", 
+            "lone ranger", "tonto",
+
+            # New additions
+            "frozen", "elsa", "anna", "olaf", "sven", "arendelle", "let it go",
+            "moana", "maui", "pua", "heihei", "te fiti", "wayfinding",
+            "lion king", "simba", "mufasa", "scar", "timon", "pumbaa", "hakuna matata",
+            "cinderella", "fairy godmother", "prince charming", "glass slipper",
+            "beauty and the beast", "belle", "beast", "gaston", "lumiere", "cogsworth",
+            "hercules", "hades", "megara", "pegasus", "phil", "mount olympus",
+            "snow white", "seven dwarfs", "evil queen", "poison apple",
+            "little mermaid", "ariel", "ursula", "flounder", "sebastian", "under the sea",
+            "encanto", "mirabel", "bruno", "casita", "we don't talk about bruno",
+            "coco", "miguel", "hector", "dante", "land of the dead", "remember me",
+            "toy story", "woody", "buzz lightyear", "andy", "sid", "to infinity and beyond", "jessie", "toystory", "toy-story",
+            "finding nemo", "nemo", "marlin", "dory", "finding dory",
+            "up", "carl", "ellie", "russell", "dug", "paradise falls",
+            "brave", "merida",
+            "princess and the frog", "tiana", "naveen", "mama odie", "dr. facilier",
+            "raya and the last dragon", "sisu", "kumandra", "trust",
+            "pocahontas", "john smith", "grandmother willow", "colors of the wind",
+            "hunchback of notre dame", "quasimodo", "esmeralda", "clopin",
+            "tarzan", "jane", "kerchak", "terk", "trashin' the camp",
+            "winnie the pooh", "piglet", "eeyore", "tigger", "hundred acre wood",
+            "101 dalmatians", "cruella de vil", "pongo", "perdita", "dalmatians",
+            "aristocats", "duchess", "thomas o'malley", "edgar", "everybody wants to be a cat",
+            "lady and the tramp", "spaghetti kiss", "trusty", "jock",
+            "robin hood", "little john", "prince john", "robin hood and maid marian",
+            "sword in the stone", "merlin", "archimedes", "wart", "excalibur",
+            "atlantis: the lost empire", "milo thatch", "kida", "shepherd's journal",
+            "treasure planet", "jim hawkins", "long john silver", "morph",
+            "chicken little", "buck cluck", "abby mallard", "the sky is falling",
+            "bolt", "mittens", "rhino", "white fang", "super bark",
+            "emperor's new groove", "kuzco", "kronk", "yzma", "pull the lever",
+            "meet the robinsons", "keep moving forward", "bowler hat guy", "doris",
+            "rescuers", "bernard", "bianca", "madame medusa", "devil's bayou",
+            "oliver & company", "dodger", "georgette", "why should i worry",
+            "fantasia", "sorcerer's apprentice", "chernabog", "dance of the hours",
+            "dumbo", "timothy q. mouse", "pink elephants", "baby mine",
+            "bambi", "thumper", "flower", "man is in the forest",
+            "pinocchio", "geppetto", "figaro", "when you wish upon a star",
+            "peter pan", "wendy", "captain hook", "tick tock croc", "second star to the right",
+            "mary poppins", "supercalifragilisticexpialidocious", "jolly holiday", "chim chim cheree",
+            "three caballeros", "donald duck", "jose carioca", "panchito", "ay caramba",
+            "chip 'n' dale", "rescue rangers", "gadget hackwrench", "monterey jack",
+            "ducktales", "huey", "dewey", "louie", "scrooge mcduck", "woo-oo",
+            "darkwing duck", "let's get dangerous", "launchpad mcquack", "st. canard",
+            "gravity falls", "dipper", "mabel", "grunkle stan", "mystery shack",
+            "the owl house", "luz", "eda", "king", "boiling isles",
+            "amphibia", "anne boonchuy", "sprig", "hop pop", "wally",
+            "star vs. the forces of evil", "star butterfly", "marco", "wand", "mewni",
+            "kim possible", "ron stoppable", "rufus", "naked mole rat", "what's the sitch",
+            "gargoyles", "goliath", "demona", "xanatos", "stone sleep",
+            "sofia the first", "enchancia", "princess test", "amulet of avalor",
+            "elena of avalor", "scepter of light", "jaquin", "zuzo",
+            "mickey mouse", "minnie mouse", "pluto", "goofy", "hot dog dance", "mickey mouse", "mickey", "minnie mouse", "minnie", "donald duck", "donald",
+            "kingdom hearts", "keyblade", "sora", "riku", "kairi", "heartless"
+            "a bug’s life", "flik", "princess atta", "hopper", "dot", "tuck and roll", "anthill", "colony", "grasshoppers", "inventions",
+            "monsters, inc.", "sulley", "mike wazowski", "boo", "randall", "roz", "scream energy", "doors", "monstropolis", "scarers", "university", "monsters u",
+            "cars", "lightning mcqueen", "mcqueen", "mc queen", "mater", "sally", "doc hudson", "radiator springs", "francesco", "radiator springs", "holley shiftwell", "cars 2", "cars 3", "piston cup", "ka-chow", "rust-eze", "tow mater",
+            "ratatouille", "remy", "linguini", "colette", "chef gusteau", "ego", "anyone can cook", "la ratatouille", "little chef", "critic",
+            "monsters university", "young sulley", "young mike", "dean hardscrabble", "ok", "fear tech", "scare games", "fraternity scream", "jump scare",
+            "the good dinosaur", "arlo", "spot", "butch", "nash", "ramsey", "river adventure", "family journey", "survival", "claw marks"
+        }
+
+        # Marvel keywords including characters and movies
+        self.marvel_keywords = {
+            # General Marvel terms
+            "marvel", "avengers", "shield", "xmen", "x-men",
+            
+            # Major characters
+            
+            "iron man", "tony stark", "iron-man",
+            "captain america", "steve rogers",
+            "thor",
+            "hulk", "bruce banner", "the incredible hulk",
+            "black widow", "natasha romanoff",
+            "hawkeye", "clint barton",
+            "spider man", "spiderman", "peter parker",
+            "black panther", "tchalla", "t'challa", "vibranium",
+            "ant man", "scott lang", "ant-man",
+            "vision", "wandavision",
+            "doctor strange",
+            "iron fist",
+            "rocket",
+            "star lord",
+            "nick fury",
+            "thanos",
+            "falcon",
+            "loki",
+            "asgard",
+            "wakanda",
+            "sokovia",
+            "gamora",
+            "venom",
+            "yondu",
+            "ronan",
+            "hulkbuster",
+            "captain marvel",
+            "nova",
+            "wanda",
+            "ultron",
+            "drax",
+            "groot",
+            "green goblin", "norman osborn",
+            "winter soldier"
+            
+            # Movies
+            "infinity war",
+            "endgame",
+            "civil war",
+            "age of ultron",
+            "guardians of the galaxy", "gotg",
+        }
+
+        # Star Wars keywords including characters and movies
+        self.star_wars_keywords = {
+            # General Star Wars terms
+            "star wars", "starwars", "jedi", "sith", "force", "lightsaber", "rebel", "droid", "resistance", "millennium falcon", "wookie", "wookies",
+            "ewoks", "high republic", "republic",
+
+            
+            # Original characters
+            "luke skywalker", "luke",
+            "darth vader", "vader", "anakin skywalker", "anakin",
+            "princess leia", "leia",
+            "han solo", "solo",
+            "chewbacca", "chewie",
+            "yoda","mace windu",
+            "obi wan", "obi-wan", "kenobi",
+            "boba fett", "boba", "mando",
+            "darth maul", "maul",
+            "jabba", "r2d2", "c3po", "grogu", "palpatine", "clones", "general grievous",
+            
+            # planets/locations
+            "tatooine", "tatooine planet",
+            "coruscant", "coruscant planet",
+            "naboo", "naboo planet",
+            "hoth", "hoth planet",
+            "dagobah", "dagobah planet",
+            "bespin", "bespin planet",
+            "endor", "endor planet", "forest moon of endor",
+            "alderaan", "alderaan planet",
+            "mustafar", "mustafar planet",
+            "kashyyyk", "kashyyyk planet",
+            "kamino", "kamino planet",
+            "geonosis", "geonosis planet",
+            "utapau", "utapau planet",
+            "felucia", "felucia planet",
+            "mygeeto", "mygeeto planet",
+            "cato neimoidia", "cato neimoidia planet",
+            "sullust", "sullust planet",
+            "jakku", "jakku planet",
+            "ahch-to", "ahch-to planet",
+            "crait", "crait planet",
+            "exegol", "exegol planet"
+            "death star",
+
+
+            # star wars rebels
+            "ezra bridger", "ezra",
+            "kanan jarrus", "kanan", "caleb dume",
+            "hera syndulla", "hera",
+            "sabine wren", "sabine",
+            "zeb orrelios", "zeb", "garazeb",
+            "chopper", "c1-10p",
+            "agent kallus", "alexsandr kallus", "kallus",
+            "grand admiral thrawn", "thrawn", "mitth'raw'nuruodo",
+            "darth vader", "vader", "anakin skywalker",
+            "ahsoka tano", "ahsoka", "fulcrum",
+
+            # Sequels characters
+            "rey",
+            "finn",
+            "kylo ren", "ben solo", "first order",
+            "tfa",
+            "poe", "poe dameron", 
+
+            # Movies and shows
+            "episode", "prequels", "originals", "sequels",
+            "phantom menace",
+            "attack of the clones",
+            "revenge of the sith",
+            "new hope",
+            "empire strikes back",
+            "return of the jedi",
+            "force awakens", "the force awakens",
+            "last jedi",
+            "rise of skywalker",
+            "mandalorian", "the mandalorian",
+            "clone wars", "tcw", "the clone wars",
+            "rogue one",
+            "rebels"
+        }
+
+    def analyze_text(self, text: str) -> list[str]:
         """
         Analyzes text and returns matching franchise tags.
         Returns "Other" if no franchise tags are found.
+        Now includes character names and movie titles for more accurate matching.
         """
         text = text.lower()
         tags = []
         
-        # Check for each franchise
-        if "disney" in text:
+        # Check for each franchise using keywords
+        if any(keyword in text for keyword in self.disney_keywords):
             tags.append("Disney")
-        if "marvel" in text:
+            
+        if any(keyword in text for keyword in self.marvel_keywords):
             tags.append("Marvel")
-        if "star wars" in text or "starwars" in text:
+            
+        if any(keyword in text for keyword in self.star_wars_keywords):
             tags.append("Star Wars")
             
         # If no tags were found, add "Other"
