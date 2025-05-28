@@ -28,6 +28,7 @@ TOKEN = os.getenv('BOT_TOKEN')
 intents = discord.Intents.default()
 intents.message_content = True  # Stelle sicher, dass diese Intention gesetzt ist
 
+VALID_TAGS = ["Disney", "Marvel", "Star Wars", "Other"]
 
 class ToyboxCounter:
     def __init__(self):
@@ -553,10 +554,21 @@ async def update_toybox_database(guild: discord.Guild):
     if not forum_channel or not isinstance(forum_channel, ForumChannel):
         print("⚠️ Forum channel not found!")
         return
-    
+
+    # Load existing data
+    existing_toyboxes = {}
+    try:
+        with open(toybox_data_file, "r", encoding='utf-8') as f:
+            existing_data = json.load(f)
+            # Create a lookup dictionary using thread ID
+            existing_toyboxes = {str(item['id']): item for item in existing_data}
+    except FileNotFoundError:
+        print("📝 No existing toybox data found, creating new database...")
+
     analyzer = SimpleTagAnalyzer()
     toybox_list = []
     
+    # Gather all threads
     threads = list(forum_channel.threads)
     async for archived_thread in forum_channel.archived_threads(limit=None):
         threads.append(archived_thread)
@@ -564,30 +576,38 @@ async def update_toybox_database(guild: discord.Guild):
     print(f"🔄 Updating Toybox database with {len(threads)} threads...")
     
     for thread in threads:
-        print(f"📝 Analyzing Thread: {thread.name}")
-        
-        first_message = None
-        async for msg in thread.history(oldest_first=True, limit=1):
-            first_message = msg
-            break  # Only need the first message
-        
-        if not first_message:
-            print(f"⚠️ No messages in thread: {thread.name}")
-            continue
-        
-        analysis_text = f"{thread.name} {first_message.content}"
-        tags = analyzer.analyze_text(analysis_text)
-        
-        toybox_entry = {
-            "id": thread.id,
-            "name": thread.name,
-            "url": thread.jump_url,
-            "tags": tags
-        }
-        
+        thread_id = str(thread.id)
+        print(f"📝 Processing Thread: {thread.name}")
+
+        # If thread exists and already has tags, preserve them
+        if thread_id in existing_toyboxes:
+            toybox_entry = existing_toyboxes[thread_id]
+            print(f"✓ Preserving existing tags for '{thread.name}': {', '.join(toybox_entry['tags'])}")
+        else:
+            # Only analyze new threads or threads without tags
+            first_message = None
+            async for msg in thread.history(oldest_first=True, limit=1):
+                first_message = msg
+                break
+
+            if not first_message:
+                print(f"⚠️ No messages in thread: {thread.name}")
+                continue
+
+            analysis_text = f"{thread.name} {first_message.content}"
+            tags = analyzer.analyze_text(analysis_text)
+
+            toybox_entry = {
+                "id": thread.id,
+                "name": thread.name,
+                "url": thread.jump_url,
+                "tags": tags
+            }
+            print(f"✅ Added new tags to '{thread.name}': {', '.join(tags)}")
+
         toybox_list.append(toybox_entry)
-        print(f"✅ Added tags to '{thread.name}': {', '.join(tags)}")
-    
+
+    # Save updated database
     with open(toybox_data_file, "w", encoding='utf-8') as f:
         json.dump(toybox_list, f, indent=4, ensure_ascii=False)
     
@@ -1528,20 +1548,52 @@ async def creator_search(interaction: discord.Interaction, creator_name: str):
 
 
 
+@bot.tree.command(
+    name="update_toyboxes", 
+    description="Manually update the Toybox database"
+)
 
-
-
-@bot.tree.command(name="update_toyboxes", description="Manually update the Toybox database")
 async def update_toyboxes(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
-    await update_toybox_database(interaction.guild)
-    await interaction.followup.send("✅ Toybox database has been updated!", ephemeral=True)
+    success = await update_toybox_database(interaction.guild)
+    if success:
+        await interaction.followup.send("✅ Toybox database has been updated!", ephemeral=True)
+    else:
+        await interaction.followup.send("❌ Error updating toybox database", ephemeral=True)
+
+@bot.tree.command(
+    name="set_tag", 
+    description="Manually set a tag for a thread"
+)
+
+@app_commands.choices(tag=[
+    app_commands.Choice(name=tag, value=tag) for tag in VALID_TAGS
+])
+async def set_tag(interaction: discord.Interaction, thread_id: str, tag: str):
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        with open(toybox_data_file, "r", encoding='utf-8') as f:
+            toybox_list = json.load(f)
+        
+        found = False
+        for toybox in toybox_list:
+            if str(toybox["id"]) == thread_id:  # Changed to match your database structure
+                toybox["tags"] = [tag]
+                found = True
+                break
+        
+        if found:
+            with open(toybox_data_file, "w", encoding='utf-8') as f:
+                json.dump(toybox_list, f, indent=4, ensure_ascii=False)
+            await interaction.followup.send(f"✅ Updated tag for thread {thread_id} to {tag}", ephemeral=True)
+        else:
+            await interaction.followup.send("❌ Thread not found", ephemeral=True)
+            
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 async def search_toyboxes(query: str) -> List[Dict]:
-    """
-    Searches for Toyboxes based on a query string.
-    Returns matches based on case-insensitive exact tag matches.
-    """
     try:
         with open(toybox_data_file, "r", encoding='utf-8') as f:
             toybox_list = json.load(f)
@@ -1550,14 +1602,10 @@ async def search_toyboxes(query: str) -> List[Dict]:
         return []
     
     query = query.lower()
-    
-    # Debug logging
     print(f"Searching for tag: '{query}'")
-    for toybox in toybox_list[:5]:  # Print first 5 toyboxes for debugging
-        print(f"Toybox tags: {toybox['tags']}")
     
     matches = [
-        t for t in toybox_list 
+        t for t in toybox_list
         if any(tag.lower() == query for tag in t["tags"])
     ]
     
