@@ -1167,7 +1167,7 @@ CONTENT_OFFSET = 84  # Offset für die Metadaten
 
 @bot.tree.command(
     name="meta",
-    description="Extracts metadata from an EHRR or EHRA file."
+    description="Extracts metadata from ZIP, EHRR or EHRA file."
 )
 async def meta(interaction: discord.Interaction, ehr_file: discord.Attachment):
     try:
@@ -1293,7 +1293,7 @@ forum_channel_id = 1253093395920851054  # Ersetze dies mit der tatsächlichen ID
 
 @bot.tree.command(
     name="play",
-    description="Play a randomly selected Toybox"
+    description="Bot suggests a random toybox"
 )
 @app_commands.describe(count="Number of Toyboxes to select (1-20)")
 async def random_thread(interaction: discord.Interaction, count: int = 1):
@@ -1449,7 +1449,7 @@ async def top_of_the_week(interaction: discord.Interaction):
 
 @bot.tree.command(
     name="blacklist_top_threads",
-    description="Blacklist or unblacklist threads by their ID"
+    description="Blacklist or unblacklist threads by their ID for top of the week ranking"
 )
 @app_commands.describe(thread_id="The ID of the thread to blacklist or remove from blacklist (optional)")
 async def blacklist_top_threads(interaction: discord.Interaction, thread_id: str = None):
@@ -1550,7 +1550,7 @@ async def creator_search(interaction: discord.Interaction, creator_name: str):
 
 @bot.tree.command(
     name="update_toyboxes", 
-    description="Manually update the Toybox database"
+    description="Update the Toybox database threads with tags"
 )
 
 async def update_toyboxes(interaction: discord.Interaction):
@@ -1562,15 +1562,21 @@ async def update_toyboxes(interaction: discord.Interaction):
         await interaction.followup.send("❌ Error updating toybox database", ephemeral=True)
 
 @bot.tree.command(
-    name="set_tag", 
-    description="Manually set a tag for a thread"
+    name="set_tag",
+    description="Set a tag for this thread (use in destination thread)"
 )
-
 @app_commands.choices(tag=[
     app_commands.Choice(name=tag, value=tag) for tag in VALID_TAGS
 ])
-async def set_tag(interaction: discord.Interaction, thread_id: str, tag: str):
+async def set_tag(interaction: discord.Interaction, tag: str):  # Removed thread_id parameter
     await interaction.response.defer(ephemeral=True)
+    
+    # Check if command is used in a thread
+    if not isinstance(interaction.channel, discord.Thread):
+        await interaction.followup.send("❌ This command can only be used in a thread!", ephemeral=True)
+        return
+    
+    thread_id = str(interaction.channel.id)
     
     try:
         with open(toybox_data_file, "r", encoding='utf-8') as f:
@@ -1578,7 +1584,7 @@ async def set_tag(interaction: discord.Interaction, thread_id: str, tag: str):
         
         found = False
         for toybox in toybox_list:
-            if str(toybox["id"]) == thread_id:  # Changed to match your database structure
+            if str(toybox["id"]) == thread_id:
                 toybox["tags"] = [tag]
                 found = True
                 break
@@ -1586,13 +1592,13 @@ async def set_tag(interaction: discord.Interaction, thread_id: str, tag: str):
         if found:
             with open(toybox_data_file, "w", encoding='utf-8') as f:
                 json.dump(toybox_list, f, indent=4, ensure_ascii=False)
-            await interaction.followup.send(f"✅ Updated tag for thread {thread_id} to {tag}", ephemeral=True)
+            await interaction.followup.send(f"✅ Updated tag for this thread to {tag}", ephemeral=True)
         else:
-            await interaction.followup.send("❌ Thread not found", ephemeral=True)
+            await interaction.followup.send("❌ Thread not found in database. Try running /update_toyboxes first", ephemeral=True)
             
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
-
+        
 async def search_toyboxes(query: str) -> List[Dict]:
     try:
         with open(toybox_data_file, "r", encoding='utf-8') as f:
@@ -1611,10 +1617,6 @@ async def search_toyboxes(query: str) -> List[Dict]:
     
     print(f"Found {len(matches)} matches for '{query}'")
     return matches
-
-
-
-
 
 
 
@@ -1845,7 +1847,7 @@ async def toybox_finder(interaction: discord.Interaction):
     # Send initial category selection message
     await interaction.response.send_message(
         embed=discord.Embed(
-            title="🌌 Toybox Finder",
+            title="Disney Infinity Toybox Explorer",
             description="Choose a universe:",
             color=discord.Color.blue()
         ),
