@@ -1642,12 +1642,15 @@ async def toybox_finder(interaction: discord.Interaction):
         async def back_callback(interaction: discord.Interaction):
             await interaction.response.edit_message(
                 embed=discord.Embed(
-                    title="🌌 Toybox Finder",
-                    description="Choose a universe:",
+                    title="🕹 Disney Infinity Toybox Explorer",
+                    description=(
+                            "Select your universe and explore incredible Toyboxes from your favorite franchise Toyboxes."
+                    ),
                     color=discord.Color.blue()
+
                 ),
                 view=main_view
-            )
+    )
         
         back_button.callback = back_callback
         
@@ -1847,9 +1850,12 @@ async def toybox_finder(interaction: discord.Interaction):
     # Send initial category selection message
     await interaction.response.send_message(
         embed=discord.Embed(
-            title="Disney Infinity Toybox Explorer",
-            description="Choose a universe:",
+            title="🕹 Disney Infinity Toybox Explorer",
+            description=(
+                    "Select your universe and explore incredible Toyboxes from your favorite franchise Toyboxes."
+            ),
             color=discord.Color.blue()
+
         ),
         view=main_view
     )
