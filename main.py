@@ -225,6 +225,244 @@ class RatingView(View):
             average = sum(ratings) / len(ratings)
             message_ratings[message_id]['average'] = average
 
+
+
+
+
+
+
+
+class ToyboxView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)  # Make view persistent
+        
+    @discord.ui.button(label="🏰 Disney", style=discord.ButtonStyle.primary, custom_id="toybox_disney")
+    async def disney_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.category_callback(interaction, "Disney")
+        
+    @discord.ui.button(label="🦸 Marvel", style=discord.ButtonStyle.primary, custom_id="toybox_marvel")
+    async def marvel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.category_callback(interaction, "Marvel")
+        
+    @discord.ui.button(label="✨ Star Wars", style=discord.ButtonStyle.primary, custom_id="toybox_starwars")
+    async def starwars_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.category_callback(interaction, "Star Wars")
+        
+    @discord.ui.button(label="🎯 Other", style=discord.ButtonStyle.primary, custom_id="toybox_other")
+    async def other_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.category_callback(interaction, "Other")
+
+    async def category_callback(self, interaction: discord.Interaction, category: str):
+        results = await search_toyboxes(category)
+        
+        if not results:
+            embed = discord.Embed(
+                title=f"🎮 {category} Toyboxes",
+                description=f"No Toyboxes found in the **{category}** category.",
+                color=discord.Color.blue()
+            )
+            view = ResultView([], category)
+            await interaction.response.edit_message(embed=embed, view=view)
+            return
+            
+        results.sort(key=lambda toybox: toybox['name'].lower())
+        view = ResultView(results, category)
+        await interaction.response.edit_message(embed=view.create_embed(), view=view)
+
+class ResultView(discord.ui.View):
+    def __init__(self, results, category):
+        super().__init__(timeout=None)
+        self.results = results
+        self.category = category
+        self.page = 0
+        self.items_per_page = 5
+        self.total_pages = max(1, (len(results) + self.items_per_page - 1) // self.items_per_page)
+        
+        # Add pagination components
+        self.update_buttons()
+        if self.total_pages > 1:
+            self.add_page_select()
+
+    def update_buttons(self):
+        # Update button states based on current page
+        self.prev_button.disabled = self.page == 0
+        self.next_button.disabled = self.page == self.total_pages - 1
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.primary, custom_id="toybox_prev")
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page > 0:
+            self.page -= 1
+            self.update_buttons()
+            if hasattr(self, 'page_select'):
+                self.update_page_select()
+            await interaction.response.edit_message(embed=self.create_embed(), view=self)
+        else:
+            await interaction.response.defer()
+            
+    @discord.ui.button(label="Back to Categories", style=discord.ButtonStyle.secondary, custom_id="toybox_back")
+    async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        main_view = ToyboxView()
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title="🕹 Disney Infinity Toybox Explorer",
+                description="Select your universe and explore incredible Toyboxes from your favorite franchise Toyboxes.",
+                color=discord.Color.blue()
+            ),
+            view=main_view
+        )
+        
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.primary, custom_id="toybox_next")
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.page < self.total_pages - 1:
+            self.page += 1
+            self.update_buttons()
+            if hasattr(self, 'page_select'):
+                self.update_page_select()
+            await interaction.response.edit_message(embed=self.create_embed(), view=self)
+        else:
+            await interaction.response.defer()
+
+    def add_page_select(self):
+        if self.total_pages <= 25:
+            # Single dropdown for pages
+            options = [
+                discord.SelectOption(
+                    label=f"Page {i + 1}",
+                    value=str(i),
+                    default=(i == self.page)
+                )
+                for i in range(self.total_pages)
+            ]
+            
+            select = discord.ui.Select(
+                placeholder=f"Page {self.page + 1}",
+                options=options,
+                custom_id="toybox_page_select"
+            )
+            
+            async def page_select_callback(interaction: discord.Interaction):
+                self.page = int(select.values[0])
+                self.update_buttons()
+                select.placeholder = f"Page {self.page + 1}"
+                await interaction.response.edit_message(embed=self.create_embed(), view=self)
+            
+            select.callback = page_select_callback
+            self.page_select = select
+            self.add_item(select)
+        else:
+            # Group selection for many pages
+            group_count = (self.total_pages + 24) // 25
+            current_group = self.page // 25
+            
+            # Group selector
+            group_options = [
+                discord.SelectOption(
+                    label=f"Pages {i * 25 + 1}-{min((i + 1) * 25, self.total_pages)}",
+                    value=str(i),
+                    default=(i == current_group)
+                )
+                for i in range(group_count)
+            ]
+            
+            group_select = discord.ui.Select(
+                placeholder=f"Pages {current_group * 25 + 1}-{min((current_group + 1) * 25, self.total_pages)}",
+                options=group_options,
+                custom_id="toybox_group_select"
+            )
+            
+            # Page selector within group
+            page_options = [
+                discord.SelectOption(
+                    label=f"Page {i + 1}",
+                    value=str(i),
+                    default=(i == self.page)
+                )
+                for i in range(current_group * 25, min((current_group + 1) * 25, self.total_pages))
+            ]
+            
+            page_select = discord.ui.Select(
+                placeholder=f"Page {self.page + 1}",
+                options=page_options,
+                custom_id="toybox_page_select"
+            )
+            
+            async def group_select_callback(interaction: discord.Interaction):
+                group_index = int(group_select.values[0])
+                self.page = group_index * 25
+                self.update_buttons()
+                self.update_page_select()
+                await interaction.response.edit_message(embed=self.create_embed(), view=self)
+            
+            async def page_select_callback(interaction: discord.Interaction):
+                self.page = int(page_select.values[0])
+                self.update_buttons()
+                page_select.placeholder = f"Page {self.page + 1}"
+                await interaction.response.edit_message(embed=self.create_embed(), view=self)
+            
+            group_select.callback = group_select_callback
+            page_select.callback = page_select_callback
+            
+            self.group_select = group_select
+            self.page_select = page_select
+            self.add_item(group_select)
+            self.add_item(page_select)
+
+    def update_page_select(self):
+        if hasattr(self, 'page_select'):
+            if hasattr(self, 'group_select'):
+                # Update group select
+                current_group = self.page // 25
+                self.group_select.placeholder = f"Pages {current_group * 25 + 1}-{min((current_group + 1) * 25, self.total_pages)}"
+                
+                # Update page select options within current group
+                start_page = current_group * 25
+                end_page = min((current_group + 1) * 25, self.total_pages)
+                self.page_select.options = [
+                    discord.SelectOption(
+                        label=f"Page {i + 1}",
+                        value=str(i),
+                        default=(i == self.page)
+                    )
+                    for i in range(start_page, end_page)
+                ]
+            else:
+                # Single page select
+                self.page_select.placeholder = f"Page {self.page + 1}"
+                for option in self.page_select.options:
+                    option.default = (int(option.value) == self.page)
+
+    def create_embed(self):
+        embed = discord.Embed(
+            title=f"🎮 {self.category} Toyboxes (Page {self.page + 1} of {self.total_pages})",
+            color=discord.Color.blue()
+        )
+        embed.description = f"Found **{len(self.results)}** {self.category} Toyboxes"
+        
+        start_index = self.page * self.items_per_page
+        end_index = min(start_index + self.items_per_page, len(self.results))
+        
+        for toybox in self.results[start_index:end_index]:
+            embed.add_field(
+                name=toybox["name"],
+                value=f"🔗 [Link]({toybox['url']})\n📌 {', '.join(toybox['tags'])}",
+                inline=False
+            )
+        return embed
+
+async def search_toyboxes(category: str):
+    # This is a placeholder function - replace with your actual database query
+    # Example return format:
+    return [
+        {
+            "name": f"Example Toybox {i}",
+            "url": f"https://example.com/toybox{i}",
+            "tags": ["tag1", "tag2"],
+            "category": category
+        }
+        for i in range(1, 6)
+    ]
+
+
     # Jeder Button benötigt einen eindeutigen custom_id, damit er persistent ist
     @discord.ui.button(label="⭐️", style=discord.ButtonStyle.primary, custom_id="rate_1_{self.message_id}")
     async def rate_1(self, interaction: discord.Interaction, button: Button):
@@ -1621,241 +1859,15 @@ async def search_toyboxes(query: str) -> List[Dict]:
 
 
 @bot.tree.command(name="toybox_finder", description="Find Toyboxes by franchise")
-@commands.is_owner()
+@app_commands.default_permissions(administrator=True)
 async def toybox_finder(interaction: discord.Interaction):
-    # Create the main view with category buttons
-    main_view = PersistentView(timeout=None)
-
-    # Define the category buttons
-    categories = [
-        ("Disney", "🏰"), ("Marvel", "🦸"),
-        ("Star Wars", "✨"), ("Other", "🎯")
-    ]
-
-    async def category_callback(interaction: discord.Interaction, category: str):
-        results = await search_toyboxes(category)
-        
-        # Create base view with back button
-        view = PersistentView(timeout=None)
-        back_button = discord.ui.Button(label="Back to Categories", style=discord.ButtonStyle.secondary)
-        
-        async def back_callback(interaction: discord.Interaction):
-            await interaction.response.edit_message(
-                embed=discord.Embed(
-                    title="🕹 Disney Infinity Toybox Explorer",
-                    description=(
-                            "Select your universe and explore incredible Toyboxes from your favorite franchise Toyboxes."
-                    ),
-                    color=discord.Color.blue()
-
-                ),
-                view=main_view
-    )
-        
-        back_button.callback = back_callback
-        
-        # If no results, show empty state
-        if not results:
-            embed = discord.Embed(
-                title=f"🎮 {category} Toyboxes",
-                description=f"No Toyboxes found in the **{category}** category.",
-                color=discord.Color.blue()
-            )
-            view.add_item(back_button)
-            await interaction.response.edit_message(embed=embed, view=view)
-            return
-            
-        # If we have results, set up pagination
-        results.sort(key=lambda toybox: toybox['name'].lower())
-        items_per_page = 5
-        total_pages = max(1, (len(results) + items_per_page - 1) // items_per_page)
-        page = 0
-
-        def create_embed(page):
-            embed = discord.Embed(
-                title=f"🎮 {category} Toyboxes (Page {page + 1} of {total_pages})",
-                color=discord.Color.blue()
-            )
-            embed.description = f"Found **{len(results)}** {category} Toyboxes"
-            
-            start_index = page * items_per_page
-            end_index = min(start_index + items_per_page, len(results))
-            toybox_page = results[start_index:end_index]
-
-            for toybox in toybox_page:
-                embed.add_field(
-                    name=toybox["name"],
-                    value=f"🔗 [Link]({toybox['url']})\n📌 {', '.join(toybox['tags'])}",
-                    inline=False
-                )
-            return embed
-
-        # Add navigation buttons
-        prev_button = discord.ui.Button(label="Previous", style=discord.ButtonStyle.primary)
-        next_button = discord.ui.Button(label="Next", style=discord.ButtonStyle.primary)
-        prev_button.disabled = True
-        next_button.disabled = total_pages == 1
-
-        async def prev_callback(interaction: discord.Interaction):
-            nonlocal page
-            if page > 0:
-                page -= 1
-                next_button.disabled = False
-                prev_button.disabled = page == 0
-                if page_group_select:
-                    update_page_select_options(page)
-                update_page_select_placeholder()
-                await interaction.response.edit_message(embed=create_embed(page), view=view)
-            else:
-                await interaction.response.defer()
-                
-        async def next_callback(interaction: discord.Interaction):
-            nonlocal page
-            if page < total_pages - 1:
-                page += 1
-                prev_button.disabled = False
-                next_button.disabled = page == total_pages - 1
-                if page_group_select:
-                    update_page_select_options(page)
-                update_page_select_placeholder()
-                await interaction.response.edit_message(embed=create_embed(page), view=view)
-            else:
-                await interaction.response.defer()
-
-        prev_button.callback = prev_callback
-        next_button.callback = next_callback
-        view.add_item(prev_button)
-        view.add_item(next_button)
-
-        # Add page selection dropdown if there are multiple pages
-        page_select = None
-        page_group_select = None
-
-        def create_page_options(start_page, end_page):
-            return [
-                discord.SelectOption(
-                    label=f"Page {i + 1}",
-                    value=str(i),
-                    default=(i == page)
-                )
-                for i in range(start_page, min(end_page, total_pages))
-            ]
-
-        def update_page_select_placeholder():
-            if page_select:
-                page_select.placeholder = f"Page {page + 1}"
-            if page_group_select:
-                current_group = page // 25
-                page_group_select.placeholder = f"Pages {current_group * 25 + 1}-{min((current_group + 1) * 25, total_pages)}"
-
-        def update_page_select_options(current_page):
-            if page_select:
-                current_group = current_page // 25
-                start_page = current_group * 25
-                end_page = start_page + 25
-                page_select.options = create_page_options(start_page, end_page)
-
-        if total_pages > 1:
-            if total_pages <= 25:
-                # If 25 or fewer pages, use a single dropdown
-                page_select = discord.ui.Select(
-                    placeholder=f"Page 1 of {total_pages}",
-                    options=create_page_options(0, total_pages),
-                    min_values=1,
-                    max_values=1
-                )
-
-                async def page_select_callback(interaction: discord.Interaction):
-                    nonlocal page
-                    page = int(page_select.values[0])
-                    prev_button.disabled = page == 0
-                    next_button.disabled = page == total_pages - 1
-                    update_page_select_placeholder()
-                    await interaction.response.edit_message(embed=create_embed(page), view=view)
-
-                page_select.callback = page_select_callback
-                view.add_item(page_select)
-            else:
-                # If more than 25 pages, use page group navigation
-                total_groups = (total_pages + 24) // 25
-                group_options = []
-                for i in range(total_groups):
-                    start_page = i * 25 + 1
-                    end_page = min((i + 1) * 25, total_pages)
-                    group_options.append(
-                        discord.SelectOption(
-                            label=f"Pages {start_page}-{end_page}",
-                            value=str(i),
-                            default=(i == 0)
-                        )
-                    )
-
-                page_group_select = discord.ui.Select(
-                    placeholder=f"Pages 1-25",
-                    options=group_options,
-                    min_values=1,
-                    max_values=1
-                )
-
-                page_select = discord.ui.Select(
-                    placeholder="Page 1",
-                    options=create_page_options(0, 25),
-                    min_values=1,
-                    max_values=1
-                )
-
-                async def group_select_callback(interaction: discord.Interaction):
-                    group_index = int(page_group_select.values[0])
-                    start_page = group_index * 25
-                    end_page = start_page + 25
-                    page_select.options = create_page_options(start_page, end_page)
-                    update_page_select_placeholder()
-                    await interaction.response.edit_message(embed=create_embed(page), view=view)
-
-                async def page_select_callback(interaction: discord.Interaction):
-                    nonlocal page
-                    page = int(page_select.values[0])
-                    prev_button.disabled = page == 0
-                    next_button.disabled = page == total_pages - 1
-                    update_page_select_placeholder()
-                    await interaction.response.edit_message(embed=create_embed(page), view=view)
-
-                page_group_select.callback = group_select_callback
-                page_select.callback = page_select_callback
-                view.add_item(page_group_select)
-                view.add_item(page_select)
-
-        # Add back button last
-        view.add_item(back_button)
-
-        # Send initial embed
-        embed = create_embed(page)
-        await interaction.response.edit_message(embed=embed, view=view)
-
-    # Set up category buttons
-    for cat, emoji in categories:
-        button = discord.ui.Button(
-            label=f"{emoji} {cat}",
-            style=discord.ButtonStyle.primary
-        )
-        
-        async def make_callback(category):
-            async def button_callback(interaction):
-                await category_callback(interaction, category)
-            return button_callback
-        
-        button.callback = await make_callback(cat)
-        main_view.add_item(button)
-
-    # Send initial category selection message
+    # Initial message with category selection
+    main_view = ToyboxView()
     await interaction.response.send_message(
         embed=discord.Embed(
             title="🕹 Disney Infinity Toybox Explorer",
-            description=(
-                    "Select your universe and explore incredible Toyboxes from your favorite franchise Toyboxes."
-            ),
+            description="Select your universe and explore incredible Toyboxes from your favorite franchise Toyboxes.",
             color=discord.Color.blue()
-
         ),
         view=main_view
     )
@@ -1947,6 +1959,10 @@ async def on_message(message):
 # 🚀 Update ausführen, wenn der Bot startet
 @bot.event
 async def on_ready():
+
+    # Add the persistent views
+    bot.add_view(ToyboxView())
+    
     # Add any existing views here
     bot.add_view(PersistentView(timeout=None))
     print(f'Bot is ready! Logged in as {bot.user.name}')
