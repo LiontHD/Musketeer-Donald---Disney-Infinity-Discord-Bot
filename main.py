@@ -234,7 +234,7 @@ class RatingView(View):
 
 class ToyboxView(discord.ui.View):
     def __init__(self):
-        super().__init__(timeout=None)  # Make view persistent
+        super().__init__(timeout=None)
         
     @discord.ui.button(label="🏰 Disney", style=discord.ButtonStyle.primary, custom_id="toybox_disney")
     async def disney_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -261,13 +261,13 @@ class ToyboxView(discord.ui.View):
                 description=f"No Toyboxes found in the **{category}** category.",
                 color=discord.Color.blue()
             )
-            view = ResultView([], category)
-            await interaction.response.edit_message(embed=embed, view=view)
+            view = ResultView([], category, interaction.user.id)
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
             return
             
         results.sort(key=lambda toybox: toybox['name'].lower())
-        view = ResultView(results, category)
-        await interaction.response.edit_message(embed=view.create_embed(), view=view)
+        view = ResultView(results, category, interaction.user.id)
+        await interaction.response.send_message(embed=view.create_embed(), view=view, ephemeral=True)
 
 class ResultView(discord.ui.View):
     def __init__(self, results, category):
@@ -1870,6 +1870,42 @@ async def toybox_finder(interaction: discord.Interaction):
             color=discord.Color.blue()
         ),
         view=main_view
+    )
+
+
+@bot.tree.command(name="toybox_setup", description="Set up the Toybox finder in a new thread")
+@app_commands.default_permissions(administrator=True)
+async def toybox_setup(interaction: discord.Interaction):
+    # Create a private thread
+    thread = await interaction.channel.create_thread(
+        name="🎮 Disney Infinity Toybox Finder",
+        type=discord.ChannelType.public_thread,
+        auto_archive_duration=10080  # 7 days
+    )
+    
+    # Lock the thread so only mods can send messages
+    await thread.edit(locked=True)
+    
+    # Send the initial message in the thread
+    main_view = ToyboxView()
+    await thread.send(
+        embed=discord.Embed(
+            title="🕹 Disney Infinity Toybox Explorer",
+            description=(
+                "Welcome to the Toybox Explorer! Click on a category below to browse available Toyboxes.\n\n"
+                "• Each category will show you personalized results\n"
+                "• Your selections will only be visible to you\n"
+                "• Use the navigation buttons to browse through the Toyboxes"
+            ),
+            color=discord.Color.blue()
+        ),
+        view=main_view
+    )
+    
+    # Send confirmation to the user
+    await interaction.response.send_message(
+        f"✅ Toybox finder has been set up in {thread.mention}! The thread is locked for posting but users can interact with the buttons.",
+        ephemeral=True
     )
 
 
