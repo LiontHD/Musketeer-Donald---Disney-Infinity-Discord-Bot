@@ -304,15 +304,9 @@ class ResultView(discord.ui.View):
             
     @discord.ui.button(label="Back to Categories", style=discord.ButtonStyle.secondary, custom_id="toybox_back")
     async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        main_view = ToyboxView()
-        await interaction.response.edit_message(
-            embed=discord.Embed(
-                title="🕹 Disney Infinity Toybox Explorer",
-                description="Select your universe and explore incredible Toyboxes from your favorite franchise.",
-                color=discord.Color.blue()
-            ),
-            view=main_view
-        )
+        await interaction.response.defer()
+        await interaction.delete_original_response()
+
         
     @discord.ui.button(label="Next", style=discord.ButtonStyle.primary, custom_id="toybox_next")
     async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
