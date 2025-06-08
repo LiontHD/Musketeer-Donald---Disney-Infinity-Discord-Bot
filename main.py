@@ -18,6 +18,10 @@ import networkx as nx
 from thefuzz import fuzz
 from discord import ForumChannel
 from typing import List, Dict
+from collections import defaultdict
+import aiohttp
+import tempfile
+import shutil
 
 
 # Discord Bot Token
@@ -44,6 +48,92 @@ class ToyboxCounter:
                 if re.match(r'^SRR\d+[A-Z]', base_name):
                     count += 1
         return count
+    
+
+class slotCounter:
+    def __init__(self):
+        self.pattern = re.compile(r"SHRR(\d+)([A-J]?)")
+
+    async def download_and_extract_zip(self, url):
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status != 200:
+                    raise Exception(f"Failed to download file: {response.status}")
+                zip_data = await response.read()
+        
+        temp_dir = tempfile.mkdtemp()
+        try:
+            with zipfile.ZipFile(io.BytesIO(zip_data)) as zip_ref:
+                # Get all file paths in the zip
+                file_list = zip_ref.namelist()
+                # Filter for SHRR files
+                shrr_files = [f for f in file_list if "SHRR" in f.upper()]
+                # Extract only SHRR files
+                for file in shrr_files:
+                    zip_ref.extract(file, temp_dir)
+            
+            # Walk through all subdirectories to find the SHRR files
+            shrr_paths = []
+            for root, _, files in os.walk(temp_dir):
+                for file in files:
+                    if "SHRR" in file.upper():
+                        shrr_paths.append(os.path.join(root, file))
+            
+            if not shrr_paths:
+                raise Exception("No SHRR files found in the zip file")
+                
+            # Use the directory containing the SHRR files
+            base_path = os.path.dirname(shrr_paths[0])
+            return base_path, temp_dir
+        except Exception as e:
+            shutil.rmtree(temp_dir)
+            raise Exception(f"Failed to process zip file: {str(e)}")
+
+    def count_unique_scrr_files(self, folder_path):
+        counts = defaultdict(set)
+        
+        # Walk through all subdirectories
+        for root, _, files in os.walk(folder_path):
+            for filename in files:
+                if "SHRR" in filename.upper():  # Only process SHRR files
+                    match = self.pattern.match(filename)
+                    if match:
+                        number, letter = match.groups()
+                        counts[number].add(letter if letter else '')
+        
+        total_count = sum(len(letters) for letters in counts.values())
+        
+        # Format results
+        results = []
+        for number, letters in sorted(counts.items(), key=lambda x: int(x[0])):
+            letters_str = ', '.join(sorted(letter for letter in letters if letter))
+            base = f"SHRR{number}"
+            if letters_str:
+                results.append(f"{base}: {letters_str}")
+            else:
+                results.append(base)
+            
+        return total_count, results
+
+    def find_missing_numbers(self, folder_path, min_num=0, max_num=300):
+        all_numbers = set(range(min_num, max_num + 1))
+        found_numbers = set()
+        
+        # Walk through all subdirectories
+        for root, _, files in os.walk(folder_path):
+            for filename in files:
+                if "SHRR" in filename.upper():  # Only process SHRR files
+                    match = re.findall(r'SHRR(\d+)', filename.upper())
+                    if match:
+                        found_numbers.update(map(int, match))
+        
+        missing_numbers = all_numbers - found_numbers
+        return sorted(missing_numbers)
+    
+
+
+
+    
 
 class EndCountingButton(Button):
     def __init__(self, counter: ToyboxCounter, user_id: int, progress_message: discord.Message):
@@ -1833,6 +1923,140 @@ async def toybox_finder(interaction: discord.Interaction):
         ),
         view=main_view
     )
+
+
+
+@bot.tree.command(name="analyze_toyboxes", description="Analyze toybox files from a zip file")
+@app_commands.default_permissions(administrator=True)
+async def analyze_toyboxes(interaction: discord.Interaction, file: discord.Attachment = None, url: str = None):
+    if not file and not url:
+        await interaction.response.send_message("Please provide either a zip file or a URL to a zip file.", ephemeral=True)
+        return
+
+    try:
+        # First, acknowledge the interaction
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        
+        counter = slotCounter()
+        temp_dir = None
+        
+        try:
+            if file:
+                # Send a status update
+                await interaction.followup.send("📥 Downloading and processing file...", ephemeral=True)
+                
+                zip_data = await file.read()
+                temp_dir = tempfile.mkdtemp()
+                
+                with zipfile.ZipFile(io.BytesIO(zip_data)) as zip_ref:
+                    file_list = zip_ref.namelist()
+                    shrr_files = [f for f in file_list if "SHRR" in f.upper()]
+                    
+                    if not shrr_files:
+                        await interaction.followup.send("❌ No SHRR files found in the zip file.", ephemeral=True)
+                        return
+                        
+                    for file in shrr_files:
+                        zip_ref.extract(file, temp_dir)
+                
+                base_path = temp_dir
+                
+            else:
+                # Send a status update
+                await interaction.followup.send("📥 Downloading and processing URL...", ephemeral=True)
+                base_path, temp_dir = await counter.download_and_extract_zip(url)
+
+            # Send a status update
+            await interaction.followup.send("🔍 Analyzing files...", ephemeral=True)
+            
+            total_count, file_results = counter.count_unique_files(base_path)
+            missing_numbers = counter.find_missing_numbers(base_path)
+            
+            # Create embed for results
+            embed = discord.Embed(
+                title="🗂️ Toybox File Analysis",
+                color=discord.Color.blue()
+            )
+            
+            embed.add_field(
+                name="📊 Total Toyboxes",
+                value=str(total_count),
+                inline=False
+            )
+            
+            # Split results into multiple embeds if needed
+            embeds = [embed]
+            current_embed = embed
+            field_count = 1
+
+            # Add file results
+            for i, result in enumerate(file_results):
+                if field_count >= 25:  # Discord has a limit of 25 fields per embed
+                    current_embed = discord.Embed(
+                        title=f"🗂️ Toybox File Analysis (Continued)",
+                        color=discord.Color.blue()
+                    )
+                    embeds.append(current_embed)
+                    field_count = 0
+
+                current_embed.add_field(
+                    name=f"📁 File {i+1}",
+                    value=result,
+                    inline=False
+                )
+                field_count += 1
+            
+            # Add missing numbers to the last embed
+            if missing_numbers:
+                missing_str = ", ".join(map(str, missing_numbers[:20]))
+                if len(missing_numbers) > 20:
+                    missing_str += f"... and {len(missing_numbers) - 20} more"
+                
+                current_embed.add_field(
+                    name="🔍 Missing Numbers",
+                    value=f"Count: {len(missing_numbers)}\nNumbers: {missing_str}",
+                    inline=False
+                )
+            else:
+                current_embed.add_field(
+                    name="✅ Missing Numbers",
+                    value="All numbers from 0 to 300 are present",
+                    inline=False
+                )
+            
+            # Send all embeds
+            for i, embed in enumerate(embeds):
+                if i == 0:
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+                else:
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+            
+        except Exception as e:
+            error_message = f"An error occurred while processing the file: {str(e)}"
+            try:
+                await interaction.followup.send(error_message, ephemeral=True)
+            except:
+                print(f"Failed to send error message: {error_message}")
+        
+        finally:
+            if temp_dir and os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+                
+    except discord.errors.NotFound:
+        print("Interaction not found - it may have timed out")
+    except Exception as e:
+        print(f"Failed to process command: {str(e)}")
+
+
+
+
+
+
+
+
+
+
+
 
 
 @bot.event
