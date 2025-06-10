@@ -22,6 +22,7 @@ from collections import defaultdict
 import aiohttp
 import tempfile
 import shutil
+import asyncio
 
 
 # Discord Bot Token
@@ -30,7 +31,10 @@ TOKEN = os.getenv('BOT_TOKEN')
 
 # Bot-Einstellungen
 intents = discord.Intents.default()
+intents.messages = True
 intents.message_content = True  # Stelle sicher, dass diese Intention gesetzt ist
+intents.members = True
+intents.presences = True
 
 VALID_TAGS = ["Disney", "Marvel", "Star Wars", "Other"]
 
@@ -229,6 +233,11 @@ bot = commands.Bot(command_prefix="/", intents=intents)
 message_ratings = {}  # Ein Dictionary, um die Bewertungen pro Nachricht zu speichern
 channel_titles = {}  # Speichert die Titel der Kanäle für den /play-Befehl
 counter = ToyboxCounter()
+
+# Configuration for bot monitoring
+TARGET_BOT_ID = 1284295445337739306  # Replace with the ID of the bot you want to monitor
+NOTIFICATION_CHANNEL_ID = 741316090109362277  # Replace with the channel ID where you want to send notifications
+GUILD_ID = 741308936036024341
 
 # Funktion zum Laden und Speichern von Bewertungen
 # Funktion zum Laden und Speichern von Bewertungen
@@ -1765,6 +1774,49 @@ async def blacklist_top_threads(interaction: discord.Interaction, thread_id: str
         await interaction.response.send_message(f"❌ Added thread `{thread_id}` to blacklist.", ephemeral=True)
 
 
+
+async def is_bot_online():
+    guild = bot.get_guild(GUILD_ID)
+    
+    if not guild:
+        print("Gilde nicht gefunden.")
+        return False
+    
+    # Wähle einen Textkanal, in dem beide Bots Zugriff haben
+    channel = guild.system_channel or guild.text_channels[0]
+    
+    if not channel:
+        print("Kein geeigneter Kanal gefunden.")
+        return False
+    
+    try:
+        # Sende "hello" in den Kanal
+        await channel.send('hello')
+        
+        def check(m):
+            return m.author.id == TARGET_BOT_ID and m.content.lower() == 'hi' and m.channel.id == channel.id
+        
+        # Warte auf die Antwort des Target Bots
+        msg = await bot.wait_for('message', check=check, timeout=10)  # Timeout nach 10 Sekunden
+        return True  # Bot hat geantwortet
+    except asyncio.TimeoutError:
+        return False  # Bot hat nicht geantwortet
+    except Exception as e:
+        print(f"Fehler beim Überprüfen des Bot-Status: {e}")
+        return 
+
+
+@bot.tree.command(name="monitor_status", description="Überprüfe den aktuellen Status des überwachten Bots")
+async def check_bot_status(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+    
+    is_online = await is_bot_online()
+    status_emoji = "🟢" if is_online else "🔴"
+    status_text = "online" if is_online else "offline"
+    
+    await interaction.followup.send(f"{status_emoji} Bot <@{TARGET_BOT_ID}> ist derzeit {status_text}.", ephemeral=True)
+
+
 @bot.tree.command(
     name="creator",
     description="Search for all Toybox threads by a specific creator"
@@ -2144,8 +2196,25 @@ async def on_message(message):
 
 # 🚀 Update ausführen, wenn der Bot startet
 @bot.event
-async def on_ready():
+async def on_ready():    
+    # Debug: Überprüfen, ob der Bot auf dem Server ist
+    # Optional: Status beim Start überprüfen
+    is_online = await is_bot_online()
+    status_text = "online" if is_online else "offline"
+    print(f"Der Target Bot ist {status_text}.")
 
+    guild = bot.get_guild(GUILD_ID)
+    if guild:
+        target_bot = guild.get_member(TARGET_BOT_ID)
+        if not target_bot:
+            target_bot = await guild.fetch_member(TARGET_BOT_ID)
+        if target_bot:
+            print(f"Überwachter Bot {target_bot.name} gefunden in {guild.name}")
+            print(f"Aktueller Status: {target_bot.status}")
+        else:
+            print(f"Überwachter Bot nicht gefunden in {guild.name}")
+    else:
+        print("Bot ist nicht auf dem angegebenen Server.")
     # Add the persistent views
     bot.add_view(ToyboxView())
     
