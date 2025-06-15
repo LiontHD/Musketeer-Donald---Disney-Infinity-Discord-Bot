@@ -22,7 +22,40 @@ from collections import defaultdict
 import aiohttp
 import tempfile
 import shutil
-import asyncio
+from pyairtable import Api
+from typing import Optional
+import requests
+
+
+
+# Airtable
+AIRTABLE_API_KEY = "pattNrhZdfcdNJzq9.2f37a8db4377d08185e2da1318f50a615bbce016da45bdf58c9e1470cd212ff6"
+AIRTABLE_BASE_ID = "appW7a59c1dXAFS2d"
+AIRTABLE_TABLES = {
+    "modeltrainman": "Modeltrainman",
+    "bowtieguy": "The Bow-Tie Guy",
+    "allnightgaming": "Allnightgaming",
+    "thatbrownbat": "ThatBrownBat",
+    "72pringle": "72Pringle",
+    "jk": "JK"
+}
+FORUM_CHANNEL_ID = 1340461985292226671 
+
+# Initialize Airtable connection
+airtable = Api(AIRTABLE_API_KEY)
+tables = {
+    table_key: airtable.table(AIRTABLE_BASE_ID, table_name)
+    for table_key, table_name in AIRTABLE_TABLES.items()
+}
+
+post_id = "recaMjlETRnfUdFus"  # Setze hier eine gültige Record-ID aus deiner Airtable-Tabelle
+
+url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/Allnightgaming/{post_id}"
+headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
+response = requests.get(url, headers=headers)
+
+print(response.json())  # Gibt zurück, was Airtable tatsächlich liefert
+
 
 
 # Discord Bot Token
@@ -31,10 +64,7 @@ TOKEN = os.getenv('BOT_TOKEN')
 
 # Bot-Einstellungen
 intents = discord.Intents.default()
-intents.messages = True
 intents.message_content = True  # Stelle sicher, dass diese Intention gesetzt ist
-intents.members = True
-intents.presences = True
 
 VALID_TAGS = ["Disney", "Marvel", "Star Wars", "Other"]
 
@@ -53,6 +83,8 @@ class ToyboxCounter:
                     count += 1
         return count
     
+
+
 
 class slotCounter:
     def __init__(self):
@@ -233,11 +265,6 @@ bot = commands.Bot(command_prefix="/", intents=intents)
 message_ratings = {}  # Ein Dictionary, um die Bewertungen pro Nachricht zu speichern
 channel_titles = {}  # Speichert die Titel der Kanäle für den /play-Befehl
 counter = ToyboxCounter()
-
-# Configuration for bot monitoring
-TARGET_BOT_ID = 1284295445337739306  # Replace with the ID of the bot you want to monitor
-NOTIFICATION_CHANNEL_ID = 741316090109362277  # Replace with the channel ID where you want to send notifications
-GUILD_ID = 741308936036024341
 
 # Funktion zum Laden und Speichern von Bewertungen
 # Funktion zum Laden und Speichern von Bewertungen
@@ -946,6 +973,152 @@ async def update_toybox_database(guild: discord.Guild):
         json.dump(toybox_list, f, indent=4, ensure_ascii=False)
     
     print("✅ Toybox database updated!")
+
+
+async def download_file(url: str) -> io.BytesIO:
+    if not url:
+        return None
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            if response.status == 200:
+                return io.BytesIO(await response.read())
+    return None
+
+
+
+@bot.tree.command(name="post", description="Create a forum post from Airtable data")
+@discord.app_commands.choices(
+    creator=[
+        discord.app_commands.Choice(name="Modeltrainman", value="modeltrainman"),
+        discord.app_commands.Choice(name="The Bow-Tie Guy", value="bowtieguy"),
+        discord.app_commands.Choice(name="Allnightgaming", value="allnightgaming"),
+        discord.app_commands.Choice(name="ThatBrownBat", value="thatbrownbat"),
+        discord.app_commands.Choice(name="72Pringle", value="72pringle"),
+        discord.app_commands.Choice(name="JK", value="jk")
+    ]
+)
+async def post(interaction: discord.Interaction, post_id: str, creator: str):
+    print(f"Post ID: {post_id}, Creator: {creator}")  # Debugging
+    
+    await interaction.response.defer()
+    
+    try:
+        # Create initial progress embed
+        progress_embed = discord.Embed(
+            title="📝 Creating Forum Post",
+            description=f"Fetching data for ID: {post_id} from {AIRTABLE_TABLES[creator]} table",
+            color=0xec4e4e
+        )
+        progress_embed.add_field(
+            name="Status",
+            value="Retrieving data from Airtable...",
+            inline=False
+        )
+        await interaction.followup.send(embed=progress_embed)
+        
+        # Fetch record from appropriate table
+        record = tables[creator].get(post_id)
+        if not record:
+            error_embed = discord.Embed(
+                title="❌ Error",
+                description=f"No record found with ID: {post_id} in {AIRTABLE_TABLES[creator]} table",
+                color=0xff0000
+            )
+            await interaction.followup.send(embed=error_embed)
+            return
+
+        # Extract fields
+        fields = record.get('fields', {})
+        title = fields.get('title', 'Untitled Post')
+        
+        # Create a more detailed description using available fields
+        description_parts = []
+        if fields.get('Status'):
+            description_parts.append(f"Status: {fields['Status']}")
+        if fields.get('description'):
+            description_parts.append(fields['description'])
+        
+        # If no description parts are available, add a default message
+        if not description_parts:
+            description_parts.append("No description provided")
+            
+        description = "\n".join(description_parts)
+        
+        image_urls = fields.get('images', [])
+        file_url = fields.get('file', [])
+        if isinstance(file_url, list) and file_url:
+            file_url = file_url[0].get('url')  # Get the URL from the first file object
+        
+        # Get the forum channel
+        forum_channel = bot.get_channel(FORUM_CHANNEL_ID)
+        if not forum_channel:
+            error_embed = discord.Embed(
+                title="❌ Error",
+                description="Could not find the forum channel!",
+                color=0xff0000
+            )
+            await interaction.followup.send(embed=error_embed)
+            return
+        
+        # Update progress
+        progress_embed.set_field_at(
+            0,
+            name="Status",
+            value="Creating forum thread...",
+            inline=False
+        )
+        await interaction.edit_original_response(embed=progress_embed)
+        
+        # Create thread with explicit content
+        thread = await forum_channel.create_thread(
+            name=title,
+            content=description,  # Add content here
+            reason=f"Post created via command by {interaction.user.name}"
+        )
+        
+        # Post file if any
+        if file_url:
+            progress_embed.set_field_at(
+                0,
+                name="Status",
+                value="Uploading attachment...",
+                inline=False
+            )
+            await interaction.edit_original_response(embed=progress_embed)
+            
+            file_data = await download_file(file_url)
+            if file_data:
+                file = discord.File(file_data, filename=fields.get('title', 'attachment.file'))
+                await thread.send(file=file)
+        
+        # Create success embed
+        success_embed = discord.Embed(
+            title="✅ Forum Post Created",
+            description=f"Successfully posted content from {AIRTABLE_TABLES[creator]}, ID: {post_id}",
+            color=0x00ff00
+        )
+        success_embed.add_field(
+            name="Thread",
+            value=f"[Click to view]({thread.jump_url})",
+            inline=False
+        )
+        
+        await interaction.edit_original_response(embed=success_embed)
+        
+    except Exception as e:
+        print(f"Error details: {e}")  # Add detailed error logging
+        error_embed = discord.Embed(
+            title="❌ Error",
+            description=f"An error occurred: {str(e)}",
+            color=0xff0000
+        )
+        await interaction.followup.send(embed=error_embed)
+
+
+
+
+
 
 
 @bot.tree.command(
@@ -1774,49 +1947,6 @@ async def blacklist_top_threads(interaction: discord.Interaction, thread_id: str
         await interaction.response.send_message(f"❌ Added thread `{thread_id}` to blacklist.", ephemeral=True)
 
 
-
-async def is_bot_online():
-    guild = bot.get_guild(GUILD_ID)
-    
-    if not guild:
-        print("Gilde nicht gefunden.")
-        return False
-    
-    # Wähle einen Textkanal, in dem beide Bots Zugriff haben
-    channel = guild.system_channel or guild.text_channels[0]
-    
-    if not channel:
-        print("Kein geeigneter Kanal gefunden.")
-        return False
-    
-    try:
-        # Sende "hello" in den Kanal
-        await channel.send('hello')
-        
-        def check(m):
-            return m.author.id == TARGET_BOT_ID and m.content.lower() == 'hi' and m.channel.id == channel.id
-        
-        # Warte auf die Antwort des Target Bots
-        msg = await bot.wait_for('message', check=check, timeout=10)  # Timeout nach 10 Sekunden
-        return True  # Bot hat geantwortet
-    except asyncio.TimeoutError:
-        return False  # Bot hat nicht geantwortet
-    except Exception as e:
-        print(f"Fehler beim Überprüfen des Bot-Status: {e}")
-        return 
-
-
-@bot.tree.command(name="monitor_status", description="Überprüfe den aktuellen Status des überwachten Bots")
-async def check_bot_status(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    
-    is_online = await is_bot_online()
-    status_emoji = "🟢" if is_online else "🔴"
-    status_text = "online" if is_online else "offline"
-    
-    await interaction.followup.send(f"{status_emoji} Bot <@{TARGET_BOT_ID}> ist derzeit {status_text}.", ephemeral=True)
-
-
 @bot.tree.command(
     name="creator",
     description="Search for all Toybox threads by a specific creator"
@@ -2196,25 +2326,8 @@ async def on_message(message):
 
 # 🚀 Update ausführen, wenn der Bot startet
 @bot.event
-async def on_ready():    
-    # Debug: Überprüfen, ob der Bot auf dem Server ist
-    # Optional: Status beim Start überprüfen
-    is_online = await is_bot_online()
-    status_text = "online" if is_online else "offline"
-    print(f"Der Target Bot ist {status_text}.")
+async def on_ready():
 
-    guild = bot.get_guild(GUILD_ID)
-    if guild:
-        target_bot = guild.get_member(TARGET_BOT_ID)
-        if not target_bot:
-            target_bot = await guild.fetch_member(TARGET_BOT_ID)
-        if target_bot:
-            print(f"Überwachter Bot {target_bot.name} gefunden in {guild.name}")
-            print(f"Aktueller Status: {target_bot.status}")
-        else:
-            print(f"Überwachter Bot nicht gefunden in {guild.name}")
-    else:
-        print("Bot ist nicht auf dem angegebenen Server.")
     # Add the persistent views
     bot.add_view(ToyboxView())
     
