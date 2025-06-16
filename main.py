@@ -1031,25 +1031,14 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
         # Extract fields
         fields = record.get('fields', {})
         title = fields.get('title', 'Untitled Post')
+        description = fields.get('description', 'No description provided')
         
-        # Create a more detailed description using available fields
-        description_parts = []
-        if fields.get('Status'):
-            description_parts.append(f"Status: {fields['Status']}")
-        if fields.get('description'):
-            description_parts.append(fields['description'])
-        
-        # If no description parts are available, add a default message
-        if not description_parts:
-            description_parts.append("No description provided")
-            
-        description = "\n".join(description_parts)
-        
-        image_urls = fields.get('images', [])
-        file_url = fields.get('file', [])
-        if isinstance(file_url, list) and file_url:
-            file_url = file_url[0].get('url')  # Get the URL from the first file object
-        
+        # Handle file
+        file_url = None
+        if 'file' in fields and fields['file']:
+            if isinstance(fields['file'], list) and fields['file'][0].get('url'):
+                file_url = fields['file'][0]['url']
+                
         # Get the forum channel
         forum_channel = bot.get_channel(FORUM_CHANNEL_ID)
         if not forum_channel:
@@ -1070,12 +1059,16 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
         )
         await interaction.edit_original_response(embed=progress_embed)
         
-        # Create thread with explicit content
-        thread = await forum_channel.create_thread(
+        # Create thread
+        thread_with_message = await forum_channel.create_thread(
             name=title,
-            content=description,  # Add content here
+            content=description,
             reason=f"Post created via command by {interaction.user.name}"
         )
+        
+        # Get the thread and starter message
+        thread = thread_with_message.thread
+        starter_message = thread_with_message.message
         
         # Post file if any
         if file_url:
@@ -1089,8 +1082,9 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
             
             file_data = await download_file(file_url)
             if file_data:
-                file = discord.File(file_data, filename=fields.get('title', 'attachment.file'))
-                await thread.send(file=file)
+                filename = fields['file'][0].get('filename', 'attachment.file')
+                file = discord.File(file_data, filename=filename)
+                await thread.send(file=file)  # Use thread directly to send messages
         
         # Create success embed
         success_embed = discord.Embed(
@@ -1100,7 +1094,7 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
         )
         success_embed.add_field(
             name="Thread",
-            value=f"[Click to view]({thread.jump_url})",
+            value=f"[Click to view]({starter_message.jump_url})",  # Use the starter message's jump_url
             inline=False
         )
         
