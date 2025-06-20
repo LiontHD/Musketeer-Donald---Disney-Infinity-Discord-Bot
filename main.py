@@ -1038,7 +1038,17 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
         if 'file' in fields and fields['file']:
             if isinstance(fields['file'], list) and fields['file'][0].get('url'):
                 file_url = fields['file'][0]['url']
-                
+
+        # Handle images
+        image_urls = []
+        if 'images' in fields and fields['images']:
+            if isinstance(fields['images'], list):
+                for image in fields['images']:
+                    if image.get('url'):
+                        image_urls.append(image['url'])
+
+
+
         # Get the forum channel
         forum_channel = bot.get_channel(FORUM_CHANNEL_ID)
         if not forum_channel:
@@ -1070,6 +1080,32 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
         thread = thread_with_message.thread
         starter_message = thread_with_message.message
         
+        # Post images if any
+        if image_urls:
+            progress_embed.set_field_at(
+                0,
+                name="Status",
+                value="Lade Bilder hoch...",
+                inline=False
+            )
+            await interaction.edit_original_response(embed=progress_embed)
+            
+        for idx, image_url in enumerate(image_urls):
+            progress_embed.set_field_at(
+                0,
+                name="Status",
+                value=f"Lade Bild {idx + 1} von {len(image_urls)} hoch...",
+                inline=False
+            )
+            await interaction.edit_original_response(embed=progress_embed)
+            
+            image_data = await download_file(image_url)
+            if image_data:
+                filename = fields['images'][idx].get('filename', f"image_{idx}.jpg")
+                file = discord.File(image_data, filename=filename)
+                await thread.send(file=file)
+
+
         # Post file if any
         if file_url:
             progress_embed.set_field_at(
@@ -1094,9 +1130,15 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
         )
         success_embed.add_field(
             name="Thread",
-            value=f"[Click to view]({starter_message.jump_url})",  # Use the starter message's jump_url
+            value=f"[Click to view]({starter_message.jump_url})",
             inline=False
         )
+        success_embed.add_field(
+            name="Bilder hochgeladen",
+            value=f"{len(image_urls)} Bild(er) erfolgreich hochgeladen.",
+            inline=False
+        )
+
         
         await interaction.edit_original_response(embed=success_embed)
         
