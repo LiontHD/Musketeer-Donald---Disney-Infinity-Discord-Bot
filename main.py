@@ -1040,14 +1040,27 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
                 file_url = fields['file'][0]['url']
 
         # Handle images
-        image_urls = []
+        image_files = []
         if 'images' in fields and fields['images']:
             if isinstance(fields['images'], list):
-                for image in fields['images']:
+                progress_embed.set_field_at(
+                    0,
+                    name="Status",
+                    value="Downloading images...",
+                    inline=False
+                )
+                await interaction.edit_original_response(embed=progress_embed)
+                
+                for idx, image in enumerate(fields['images']):
                     if image.get('url'):
-                        image_urls.append(image['url'])
-
-
+                        image_url = image['url']
+                        image_data = await download_file(image_url)
+                        if image_data:
+                            filename = image.get('filename', f"image_{idx}.jpg")
+                            file = discord.File(image_data, filename=filename)
+                            image_files.append(file)
+                        else:
+                            print(f"Could not download image {idx + 1}.")
 
         # Get the forum channel
         forum_channel = bot.get_channel(FORUM_CHANNEL_ID)
@@ -1064,15 +1077,16 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
         progress_embed.set_field_at(
             0,
             name="Status",
-            value="Creating forum thread...",
+            value="Creating thread with images...",
             inline=False
         )
         await interaction.edit_original_response(embed=progress_embed)
         
-        # Create thread
+        # Create thread with attached images
         thread_with_message = await forum_channel.create_thread(
             name=title,
             content=description,
+            files=image_files if image_files else None,
             reason=f"Post created via command by {interaction.user.name}"
         )
         
@@ -1080,32 +1094,6 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
         thread = thread_with_message.thread
         starter_message = thread_with_message.message
         
-        # Post images if any
-        if image_urls:
-            progress_embed.set_field_at(
-                0,
-                name="Status",
-                value="Lade Bilder hoch...",
-                inline=False
-            )
-            await interaction.edit_original_response(embed=progress_embed)
-            
-        for idx, image_url in enumerate(image_urls):
-            progress_embed.set_field_at(
-                0,
-                name="Status",
-                value=f"Lade Bild {idx + 1} von {len(image_urls)} hoch...",
-                inline=False
-            )
-            await interaction.edit_original_response(embed=progress_embed)
-            
-            image_data = await download_file(image_url)
-            if image_data:
-                filename = fields['images'][idx].get('filename', f"image_{idx}.jpg")
-                file = discord.File(image_data, filename=filename)
-                await thread.send(file=file)
-
-
         # Post file if any
         if file_url:
             progress_embed.set_field_at(
@@ -1122,6 +1110,18 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
                 file = discord.File(file_data, filename=filename)
                 await thread.send(file=file)  # Use thread directly to send messages
         
+        # **Update the Airtable record's Status to 'Published'**
+        progress_embed.set_field_at(
+            0,
+            name="Status",
+            value="Updating Airtable record status...",
+            inline=False
+        )
+        await interaction.edit_original_response(embed=progress_embed)
+
+        # Update the 'Status' field in Airtable
+        tables[creator].update(post_id, {'Status': 'Published'})
+
         # Create success embed
         success_embed = discord.Embed(
             title="✅ Forum Post Created",
@@ -1134,12 +1134,16 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
             inline=False
         )
         success_embed.add_field(
-            name="Bilder hochgeladen",
-            value=f"{len(image_urls)} Bild(er) erfolgreich hochgeladen.",
+            name="Images Uploaded",
+            value=f"{len(image_files)} image(s) successfully uploaded in the starter post.",
+            inline=False
+        )
+        success_embed.add_field(
+            name="Status Updated",
+            value="Airtable record status set to **Published**.",
             inline=False
         )
 
-        
         await interaction.edit_original_response(embed=success_embed)
         
     except Exception as e:
@@ -1150,6 +1154,8 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
             color=0xff0000
         )
         await interaction.followup.send(embed=error_embed)
+
+
 
 
 
