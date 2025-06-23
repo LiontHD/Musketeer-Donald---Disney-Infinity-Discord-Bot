@@ -1108,7 +1108,10 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
             if file_data:
                 filename = fields['file'][0].get('filename', 'attachment.file')
                 file = discord.File(file_data, filename=filename)
-                await thread.send(file=file)  # Use thread directly to send messages
+                await thread.send(
+                    content="**:arrow_down: ⎮DOWNLOAD:**",
+                    file=file
+                )  # Use thread directly to send messages
         
         # **Update the Airtable record's Status to 'Published'**
         progress_embed.set_field_at(
@@ -1124,23 +1127,23 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
 
         # Create success embed
         success_embed = discord.Embed(
-            title="✅ Forum Post Created",
-            description=f"Successfully posted content from {AIRTABLE_TABLES[creator]}, ID: {post_id}",
+            title="✅ Toybox published",
+            description=f"Successfully published the toybox {post_id} from {AIRTABLE_TABLES[creator]}",
             color=0x00ff00
         )
         success_embed.add_field(
-            name="Thread",
+            name="Post",
             value=f"[Click to view]({starter_message.jump_url})",
             inline=False
         )
         success_embed.add_field(
             name="Images Uploaded",
-            value=f"{len(image_files)} image(s) successfully uploaded in the starter post.",
+            value=f"{len(image_files)} image(s) successfully uploaded.",
             inline=False
         )
         success_embed.add_field(
             name="Status Updated",
-            value="Airtable record status set to **Published**.",
+            value="Status set to **Published** in Airtable.",
             inline=False
         )
 
