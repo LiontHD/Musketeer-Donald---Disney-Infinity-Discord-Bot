@@ -1113,6 +1113,36 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
                     file=file
                 )  # Use thread directly to send messages
         
+                # Create rating message after the file
+                message = await thread.send("<:EmojiName:741403450314850465>")
+                message_id = message.id
+
+                # Initialize rating for this message
+                if message_id not in message_ratings:
+                    message_ratings[message_id] = {
+                        'ratings': {},
+                        'average': 0,
+                        'num_ratings': 0,
+                        'channel_id': thread.id
+                    }
+
+                # Create and send rating embed
+                embed = discord.Embed(
+                    title="Toybox rating: ⭐️⭐️⭐️⭐️⭐️",
+                    description="What do you think about this toybox?",
+                    color=discord.Color.blue()
+                )
+                embed.add_field(name="Average rating", value="No ratings yet.", inline=False)
+                embed.add_field(name="Number of ratings", value="0 ratings yet.", inline=False)
+
+                await message.edit(embed=embed, view=RatingView(message_id))
+                
+                # Save the channel title for the rating system
+                channel_titles[message_id] = thread.name
+                save_ratings()
+
+
+
         # **Update the Airtable record's Status to 'Published'**
         progress_embed.set_field_at(
             0,
