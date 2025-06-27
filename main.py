@@ -25,6 +25,7 @@ import shutil
 from pyairtable import Api
 from typing import Optional
 import requests
+import asyncio 
 
 
 
@@ -306,11 +307,30 @@ def save_ratings():
             'titles': channel_titles
         }, f)
 
-# Custom View für die Knöpfe
-class RatingView(View):
+class RatingView(discord.ui.View):
     def __init__(self, message_id):
-        super().__init__(timeout=None)  # Timeout auf None setzen, damit die View nicht abläuft
-        self.message_id = message_id  # Speichere die Nachrichten-ID
+        super().__init__(timeout=None)  # Make view persistent
+        self.message_id = message_id
+
+    @discord.ui.button(label="⭐️", style=discord.ButtonStyle.primary, custom_id="rate_1")
+    async def rate_1(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_rating(interaction, 1)
+
+    @discord.ui.button(label="⭐️⭐️", style=discord.ButtonStyle.primary, custom_id="rate_2")
+    async def rate_2(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_rating(interaction, 2)
+
+    @discord.ui.button(label="⭐️⭐️⭐️", style=discord.ButtonStyle.primary, custom_id="rate_3")
+    async def rate_3(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_rating(interaction, 3)
+
+    @discord.ui.button(label="⭐️⭐️⭐️⭐️", style=discord.ButtonStyle.primary, custom_id="rate_4")
+    async def rate_4(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_rating(interaction, 4)
+
+    @discord.ui.button(label="⭐️⭐️⭐️⭐️⭐️", style=discord.ButtonStyle.primary, custom_id="rate_5")
+    async def rate_5(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.handle_rating(interaction, 5)
 
     async def handle_rating(self, interaction: discord.Interaction, rating: int):
         user_id = interaction.user.id
@@ -318,7 +338,7 @@ class RatingView(View):
 
         # Sicherstellen, dass die Nachricht existiert
         if message_id not in message_ratings:
-            message_ratings[message_id] = {'ratings': {}, 'average': 0, 'num_ratings': 0}  # num_ratings initialisieren
+            message_ratings[message_id] = {'ratings': {}, 'average': 0, 'num_ratings': 0}
 
         # Überprüfen, ob der Nutzer bereits bewertet hat
         already_voted = user_id in message_ratings[message_id]['ratings']
@@ -335,7 +355,6 @@ class RatingView(View):
             await interaction.response.send_message(
                 f'You gave {rating} ⭐️ for this toybox!', ephemeral=True
             )
-            # Die Anzahl der Bewertungen nur erhöhen, wenn es eine neue Bewertung ist
             message_ratings[message_id]['num_ratings'] += 1
 
         # Aktualisiere und speichere den durchschnittlichen Rating-Wert
@@ -585,27 +604,6 @@ async def search_toyboxes(category: str):
         for i in range(1, 6)
     ]
 
-
-    # Jeder Button benötigt einen eindeutigen custom_id, damit er persistent ist
-    @discord.ui.button(label="⭐️", style=discord.ButtonStyle.primary, custom_id="rate_1_{self.message_id}")
-    async def rate_1(self, interaction: discord.Interaction, button: Button):
-        await self.handle_rating(interaction, 1)
-
-    @discord.ui.button(label="⭐️⭐️", style=discord.ButtonStyle.primary, custom_id="rate_2_{self.message_id}")
-    async def rate_2(self, interaction: discord.Interaction, button: Button):
-        await self.handle_rating(interaction, 2)
-
-    @discord.ui.button(label="⭐️⭐️⭐️", style=discord.ButtonStyle.primary, custom_id="rate_3_{self.message_id}")
-    async def rate_3(self, interaction: discord.Interaction, button: Button):
-        await self.handle_rating(interaction, 3)
-
-    @discord.ui.button(label="⭐️⭐️⭐️⭐️", style=discord.ButtonStyle.primary, custom_id="rate_4_{self.message_id}")
-    async def rate_4(self, interaction: discord.Interaction, button: Button):
-        await self.handle_rating(interaction, 4)
-
-    @discord.ui.button(label="⭐️⭐️⭐️⭐️⭐️", style=discord.ButtonStyle.primary, custom_id="rate_5_{self.message_id}")
-    async def rate_5(self, interaction: discord.Interaction, button: Button):
-        await self.handle_rating(interaction, 5)
 
 # Funktion, um Sterne basierend auf einer durchschnittlichen Bewertung anzuzeigen (abgerundet)
 def get_star_rating(avg_rating):
@@ -1306,7 +1304,6 @@ async def user_ratings(interaction: discord.Interaction, message_id: str):
     # Sende die Nachricht mit den Bewertungen, nur für den Benutzer sichtbar
     await interaction.response.send_message(f"Ratings for message ID {message_id}:\n{ratings_message}", ephemeral=True)
     
-import asyncio  # Fehlender Import
 
 # Befehl edit
 @bot.tree.command(name="edit", description="Edit ratings for a specific message.")
@@ -1364,8 +1361,6 @@ async def edit_ratings(interaction: discord.Interaction, message_id: str, user_t
 
         # Wenn der Benutzer nicht in der Liste ist, sende eine Fehlermeldung
         await interaction.response.send_message(f"User ID <@{user_to_remove}> has not voted on this message.", ephemeral=True)
-
-import math
 
 def calculate_wilson_score(avg_rating, num_ratings, confidence=1.96):
     if num_ratings == 0:
@@ -1836,13 +1831,15 @@ async def on_ready():
 # Slash-Befehl registrieren, um die Bewertung in einem Kanal zu starten
 @bot.tree.command(name="rate", description="Create a Toybox rating with stars.")
 async def rate(interaction: discord.Interaction):
-    channel_id = interaction.channel_id  # Speichere die Kanal-ID
-    message = await interaction.channel.send("<:EmojiName:741403450314850465>")
-    message_id = message.id  # Nachrichten-ID speichern
+    channel_id = interaction.channel_id
+    
+    # First create a basic message that we'll edit
+    message = await interaction.channel.send("Creating rating...")
+    message_id = message.id
 
-    # Stelle sicher, dass es für diese Nachricht ein Bewertungssystem gibt
+    # Initialize the ratings for this message
     if message_id not in message_ratings:
-        message_ratings[message_id] = {'ratings': {}, 'average': 0, 'num_ratings': 0, 'channel_id': channel_id}  # channel_id speichern
+        message_ratings[message_id] = {'ratings': {}, 'average': 0, 'num_ratings': 0, 'channel_id': channel_id}
 
     embed = discord.Embed(
         title="Toybox rating: ⭐️⭐️⭐️⭐️⭐️",
@@ -1852,8 +1849,12 @@ async def rate(interaction: discord.Interaction):
     embed.add_field(name="Average rating", value="No ratings yet.", inline=False)
     embed.add_field(name="Number of ratings", value="0 ratings yet.", inline=False)
 
-    # Nachricht mit Bewertungsknöpfen senden
-    await interaction.response.send_message(embed=embed, view=RatingView(message_id))
+    # Create the view with the buttons
+    view = RatingView(message_id)
+    
+    # Edit the message with the embed and view
+    await message.edit(content=None, embed=embed, view=view)
+    await interaction.response.send_message("Rating created!", ephemeral=True)
     
     # Speichere den Titel des Kanals für den /play-Befehl
     channel_titles[message_id] = interaction.channel.name
