@@ -29,9 +29,19 @@ import asyncio
 
 
 
-# Airtable
-AIRTABLE_API_KEY = "pattNrhZdfcdNJzq9.2f37a8db4377d08185e2da1318f50a615bbce016da45bdf58c9e1470cd212ff6"
-AIRTABLE_BASE_ID = "appW7a59c1dXAFS2d"
+# Discord Bot Token
+load_dotenv()  # lädt die Variablen aus der .env Datei
+TOKEN = os.getenv('BOT_TOKEN')
+AIRTABLE_API_KEY = os.getenv('AIRTABLE_API_KEY')
+AIRTABLE_BASE_ID = os.getenv('AIRTABLE_BASE_ID')
+
+# Bot-Einstellungen
+intents = discord.Intents.default()
+intents.message_content = True  # Stelle sicher, dass diese Intention gesetzt ist
+
+
+# Airtable Test
+
 AIRTABLE_TABLES = {
     "modeltrainman": "Modeltrainman",
     "bowtieguy": "The Bow-Tie Guy",
@@ -57,15 +67,6 @@ response = requests.get(url, headers=headers)
 
 print(response.json())  # Gibt zurück, was Airtable tatsächlich liefert
 
-
-
-# Discord Bot Token
-load_dotenv()  # lädt die Variablen aus der .env Datei
-TOKEN = os.getenv('BOT_TOKEN')
-
-# Bot-Einstellungen
-intents = discord.Intents.default()
-intents.message_content = True  # Stelle sicher, dass diese Intention gesetzt ist
 
 VALID_TAGS = ["Disney", "Marvel", "Star Wars", "Other"]
 
