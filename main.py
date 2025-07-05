@@ -261,6 +261,28 @@ class PersistentView(View):
     async def on_timeout(self):
         return  # Prevents the view from timing out
 
+
+
+# First, create a persistent view class outside of the command
+class DownloadView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)  # Button won't timeout
+        
+    @discord.ui.button(
+        label="Download",
+        style=discord.ButtonStyle.primary,
+        custom_id="breeze_download_button"  # Persistent custom_id
+    )
+    async def download_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        download_url = "https://drive.google.com/drive/folders/13-h3yzTR9Y4kj9JZqRvINJDPs__R8VE4?usp=drive_link"
+        await interaction.response.send_message(
+            f"Here's your download link: {download_url}",
+            ephemeral=True
+        )
+
+async def setup_views():
+    bot.add_view(DownloadView())  # Add the persistent view
+
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 # Globale Variablen für nachrichten-spezifische Bewertungen
@@ -1027,21 +1049,23 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
             await interaction.followup.send(embed=error_embed)
             return
 
-        # Extract fields
+        # Extract fields with default values
         fields = record.get('fields', {})
         title = fields.get('title', 'Untitled Post')
         description = fields.get('description', 'No description provided')
         
-        # Handle file
+        # Handle file with proper type checking
         file_url = None
         if 'file' in fields and fields['file']:
-            if isinstance(fields['file'], list) and fields['file'][0].get('url'):
-                file_url = fields['file'][0]['url']
+            files_data = fields['file']
+            if isinstance(files_data, list) and files_data and isinstance(files_data[0], dict):
+                file_url = files_data[0].get('url')
 
-        # Handle images
+        # Handle images with proper type checking
         image_files = []
         if 'images' in fields and fields['images']:
-            if isinstance(fields['images'], list):
+            images_data = fields['images']
+            if isinstance(images_data, list):
                 progress_embed.set_field_at(
                     0,
                     name="Status",
@@ -1050,16 +1074,20 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
                 )
                 await interaction.edit_original_response(embed=progress_embed)
                 
-                for idx, image in enumerate(fields['images']):
-                    if image.get('url'):
-                        image_url = image['url']
-                        image_data = await download_file(image_url)
-                        if image_data:
-                            filename = image.get('filename', f"image_{idx}.jpg")
-                            file = discord.File(image_data, filename=filename)
-                            image_files.append(file)
-                        else:
-                            print(f"Could not download image {idx + 1}.")
+                for idx, image in enumerate(images_data):
+                    if isinstance(image, dict) and image.get('url'):
+                        try:
+                            image_url = image['url']
+                            image_data = await download_file(image_url)
+                            if image_data:
+                                filename = image.get('filename', f"image_{idx}.jpg")
+                                file = discord.File(image_data, filename=filename)
+                                image_files.append(file)
+                            else:
+                                print(f"Could not download image {idx + 1}: No data received")
+                        except Exception as e:
+                            print(f"Error downloading image {idx + 1}: {str(e)}")
+                            continue
 
         # Get the forum channel
         forum_channel = bot.get_channel(FORUM_CHANNEL_ID)
@@ -1089,6 +1117,9 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
             reason=f"Post created via command by {interaction.user.name}"
         )
         
+        if not thread_with_message:
+            raise Exception("Failed to create thread")
+
         # Get the thread and starter message
         thread = thread_with_message.thread
         starter_message = thread_with_message.message
@@ -1103,56 +1134,55 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
             )
             await interaction.edit_original_response(embed=progress_embed)
             
-            file_data = await download_file(file_url)
-            if file_data:
-                filename = fields['file'][0].get('filename', 'attachment.file')
-                file = discord.File(file_data, filename=filename)
-                await thread.send(
-                    content="**:arrow_down: ⎮DOWNLOAD:**",
-                    file=file
-                )  # Use thread directly to send messages
-        
-                # Create rating message after the file
-                message = await thread.send("<:EmojiName:741403450314850465>")
-                message_id = message.id
+            try:
+                file_data = await download_file(file_url)
+                if file_data:
+                    filename = fields['file'][0].get('filename', 'attachment.file')
+                    file = discord.File(file_data, filename=filename)
+                    rating_message = await thread.send(
+                        content="**:arrow_down: ⎮DOWNLOAD:**",
+                        file=file
+                    )
 
-                # Initialize rating for this message
-                if message_id not in message_ratings:
-                    message_ratings[message_id] = {
-                        'ratings': {},
-                        'average': 0,
-                        'num_ratings': 0,
-                        'channel_id': thread.id
-                    }
+                    # Create rating message
+                    if rating_message:
+                        message = await thread.send("<:EmojiName:741403450314850465>")
+                        if message:
+                            message_id = message.id
 
-                # Create and send rating embed
-                embed = discord.Embed(
-                    title="Toybox rating: ⭐️⭐️⭐️⭐️⭐️",
-                    description="What do you think about this toybox?",
-                    color=discord.Color.blue()
-                )
-                embed.add_field(name="Average rating", value="No ratings yet.", inline=False)
-                embed.add_field(name="Number of ratings", value="0 ratings yet.", inline=False)
+                            # Initialize rating for this message
+                            message_ratings[message_id] = {
+                                'ratings': {},
+                                'average': 0,
+                                'num_ratings': 0,
+                                'channel_id': thread.id
+                            }
 
-                await message.edit(embed=embed, view=RatingView(message_id))
-                
-                # Save the channel title for the rating system
-                channel_titles[message_id] = thread.name
-                save_ratings()
+                            # Create and send rating embed
+                            embed = discord.Embed(
+                                title="Toybox rating: ⭐️⭐️⭐️⭐️⭐️",
+                                description="What do you think about this toybox?",
+                                color=discord.Color.blue()
+                            )
+                            embed.add_field(name="Average rating", value="No ratings yet.", inline=False)
+                            embed.add_field(name="Number of ratings", value="0 ratings yet.", inline=False)
 
+                            await message.edit(embed=embed, view=RatingView(message_id))
+                            
+                            # Save the channel title for the rating system
+                            channel_titles[message_id] = thread.name
+                            save_ratings()
+            except Exception as e:
+                print(f"Error uploading file: {str(e)}")
+                await thread.send("⚠️ Failed to upload attachment file")
 
-
-        # **Update the Airtable record's Status to 'Published'**
-        progress_embed.set_field_at(
-            0,
-            name="Status",
-            value="Updating Airtable record status...",
-            inline=False
-        )
-        await interaction.edit_original_response(embed=progress_embed)
-
-        # Update the 'Status' field in Airtable
-        tables[creator].update(post_id, {'Status': 'Published'})
+        # Update the Airtable record's Status to 'Published'
+        try:
+            tables[creator].update(post_id, {'Status': 'Published'})
+            status_updated = True
+        except Exception as e:
+            print(f"Error updating Airtable status: {str(e)}")
+            status_updated = False
 
         # Create success embed
         success_embed = discord.Embed(
@@ -1172,14 +1202,14 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
         )
         success_embed.add_field(
             name="Status Updated",
-            value="Status set to **Published** in Airtable.",
+            value="Status set to **Published** in Airtable." if status_updated else "Failed to update status in Airtable",
             inline=False
         )
 
         await interaction.edit_original_response(embed=success_embed)
         
     except Exception as e:
-        print(f"Error details: {e}")  # Add detailed error logging
+        print(f"Error details: {str(e)}")  # Add detailed error logging
         error_embed = discord.Embed(
             title="❌ Error",
             description=f"An error occurred: {str(e)}",
@@ -1190,7 +1220,21 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
 
 
 
-
+@bot.tree.command(name="breeze", description="Get download links for Breeze")
+@discord.app_commands.describe(version="The version number (e.g., 1.0, 1.1)")
+async def breeze(interaction: discord.Interaction, version: str):
+    embed = discord.Embed(
+        title="Breeze Download",
+        description="Welcome to Breeze!\nDownload the expansion mod now! 🥳",
+        color=0x148C6A
+    )
+    
+    embed.set_footer(text=f"Made by Cassinni (v{version})")
+    
+    await interaction.response.send_message(
+        embed=embed,
+        view=DownloadView()
+    )
 
 
 
@@ -1941,6 +1985,178 @@ class PlayView(discord.ui.View):
         self.children[0].placeholder = "Select number of random Toyboxes"
         await interaction.message.edit(view=self)
 
+
+@bot.tree.command(
+    name="infos",
+    description="Extracts metadata from ZIP file in Airtable and updates the record"
+)
+@discord.app_commands.choices(
+    creator=[
+        discord.app_commands.Choice(name="Modeltrainman", value="modeltrainman"),
+        discord.app_commands.Choice(name="The Bow-Tie Guy", value="bowtieguy"),
+        discord.app_commands.Choice(name="Allnightgaming", value="allnightgaming"),
+        discord.app_commands.Choice(name="ThatBrownBat", value="thatbrownbat"),
+        discord.app_commands.Choice(name="72Pringle", value="72pringle"),
+        discord.app_commands.Choice(name="JK", value="jk")
+    ]
+)
+async def infos(interaction: discord.Interaction, post_id: str, creator: str):
+    await interaction.response.defer()
+    
+    try:
+        # Create initial progress embed
+        progress_embed = discord.Embed(
+            title="📝 Extracting Metadata",
+            description=f"Fetching data for ID: {post_id} from {AIRTABLE_TABLES[creator]} table",
+            color=0xec4e4e
+        )
+        progress_embed.add_field(
+            name="Status",
+            value="Retrieving data from Airtable...",
+            inline=False
+        )
+        await interaction.followup.send(embed=progress_embed)
+        
+        # Fetch record from appropriate table
+        record = tables[creator].get(post_id)
+        if not record:
+            error_embed = discord.Embed(
+                title="❌ Error",
+                description=f"No record found with ID: {post_id} in {AIRTABLE_TABLES[creator]} table",
+                color=0xff0000
+            )
+            await interaction.followup.send(embed=error_embed)
+            return
+
+        # Extract file URL from record
+        fields = record.get('fields', {})
+        if 'file' not in fields or not fields['file']:
+            error_embed = discord.Embed(
+                title="❌ Error",
+                description="No file found in the record",
+                color=0xff0000
+            )
+            await interaction.followup.send(embed=error_embed)
+            return
+
+        file_url = fields['file'][0]['url']
+        
+        # Create temporary directory
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = f"{temp_dir}/downloaded.zip"
+            
+            # Download file
+            progress_embed.set_field_at(
+                0,
+                name="Status",
+                value="Downloading ZIP file...",
+                inline=False
+            )
+            await interaction.edit_original_response(embed=progress_embed)
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(file_url) as response:
+                    if response.status != 200:
+                        raise Exception("Failed to download file")
+                    file_content = await response.read()
+                    
+            # Save downloaded file
+            async with aiofiles.open(file_path, 'wb') as f:
+                await f.write(file_content)
+
+            extracted_file_path = None
+            
+            # Extract ZIP and find EHRR/EHRA file
+            with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                zip_ref.extractall(temp_dir)
+                
+                # Search for EHRR or EHRA file
+                for root, _, files in os.walk(temp_dir):
+                    for file in files:
+                        if file.startswith("EHRR") or file.startswith("EHRA"):
+                            extracted_file_path = os.path.join(root, file)
+                            break
+                    if extracted_file_path:
+                        break
+
+            if not extracted_file_path:
+                await interaction.followup.send("No valid EHRR or EHRA file found in the ZIP!", ephemeral=True)
+                return
+
+            # Read and process the file
+            progress_embed.set_field_at(
+                0,
+                name="Status",
+                value="Extracting metadata...",
+                inline=False
+            )
+            await interaction.edit_original_response(embed=progress_embed)
+            
+            async with aiofiles.open(extracted_file_path, 'rb') as f:
+                file_bytes = await f.read()
+
+            # Decompress and decode data
+            decompressed_data = zlib.decompress(file_bytes[CONTENT_OFFSET:]).decode('utf-8').rstrip('\x00')
+
+            # Extract metadata
+            auth_name_match = re.search(AUTHOREDNAME_PATTERN, decompressed_data)
+            auth_desc_match = re.search(AUTHOREDDESC_PATTERN, decompressed_data)
+            date_string_match = re.search(DATESTRING_PATTERN, decompressed_data)
+
+            # Update Airtable record
+            update_fields = {}
+            metadata_text = "**Metadata Extracted:**\n"
+
+            if auth_name_match:
+                name = auth_name_match.group(1)
+                update_fields['Name'] = name
+                metadata_text += f"**Name:** {name}\n"
+
+            if auth_desc_match:
+                description = auth_desc_match.group(1)
+                update_fields['description'] = description
+                metadata_text += f"**Description:** {description}\n"
+
+            if date_string_match:
+                date = date_string_match.group(1)
+                metadata_text += f"**Date:** {date}\n"
+
+            if update_fields:
+                progress_embed.set_field_at(
+                    0,
+                    name="Status",
+                    value="Updating Airtable record...",
+                    inline=False
+                )
+                await interaction.edit_original_response(embed=progress_embed)
+                
+                # Update Airtable
+                tables[creator].update(post_id, update_fields)
+
+            # Create success embed
+            success_embed = discord.Embed(
+                title="✅ Metadata Extracted",
+                description=metadata_text if metadata_text != "**Metadata Extracted:**\n" else "No metadata found in the file.",
+                color=0x00ff00
+            )
+            if update_fields:
+                success_embed.add_field(
+                    name="Airtable Update",
+                    value="Record has been updated with the extracted metadata.",
+                    inline=False
+                )
+
+            await interaction.edit_original_response(embed=success_embed)
+
+    except zipfile.BadZipFile:
+        await interaction.followup.send("Error: Invalid ZIP file!", ephemeral=True)
+    except zlib.error:
+        await interaction.followup.send("Error: Could not decompress the file!", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred: {str(e)}", ephemeral=True)
+
+
+
 @bot.tree.command(
     name="play_init",
     description="Start an interactive Toybox randomizer"
@@ -2023,79 +2239,6 @@ async def blacklist_top_threads(interaction: discord.Interaction, thread_id: str
         save_blacklist(blacklisted_threads)
         await interaction.response.send_message(f"❌ Added thread `{thread_id}` to blacklist.", ephemeral=True)
 
-
-@bot.tree.command(
-    name="creator",
-    description="Search for all Toybox threads by a specific creator"
-)
-async def creator_search(interaction: discord.Interaction, creator_name: str):
-    # Interaktion aktiv halten
-    await interaction.response.defer(thinking=True)
-
-    # Forum-Kanal abrufen
-    forum_channel = interaction.guild.get_channel(forum_channel_id)
-    if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
-        await interaction.followup.send("Error: Forum channel not found!", ephemeral=True)
-        return
-
-    # Threads abrufen
-    print("Fetching threads...")
-    threads = list(forum_channel.threads[:50])  # Begrenzung auf 50 aktive Threads
-    archived_threads = []
-    async for thread in forum_channel.archived_threads(limit=50):  # Begrenzung auf 50 archivierte Threads
-        print(f"Found archived thread: {thread.name}")
-        archived_threads.append(thread)
-    threads.extend(archived_threads)
-
-    print(f"Total threads fetched: {len(threads)}")
-    if not threads:
-        await interaction.followup.send("No threads found in the forum channel.", ephemeral=True)
-        return
-
-    matching_threads = []
-    for thread in threads:
-        print(f"Processing thread: {thread.name}")
-        try:
-            # Erste Nachricht abrufen
-            first_message = await thread.fetch_message(thread.id)
-            print(f"Fetched message for thread: {thread.name}")
-
-            # Nachrichtentext prüfen
-            content = first_message.content
-            match = re.search(r"🎨 Creator:\s*(.+)", content)
-            if match:
-                extracted_creator = match.group(1).strip()
-                if creator_name.lower() in extracted_creator.lower():
-                    matching_threads.append(thread)
-        except discord.NotFound:
-            print(f"Message not found for thread: {thread.name}")
-        except discord.Forbidden:
-            print(f"Access forbidden for thread: {thread.name}")
-        except Exception as e:
-            print(f"Error processing thread {thread.name}: {e}")
-
-    if not matching_threads:
-        await interaction.followup.send(
-            f"No threads found for the creator: {creator_name}.",
-            ephemeral=True
-        )
-        return
-
-    # Ergebnisse anzeigen
-    embed = discord.Embed(
-        title=f"🎨 Threads by {creator_name}",
-        description=f"Here are all the threads by the creator '{creator_name}':",
-        color=discord.Color.blue()
-    )
-    for idx, thread in enumerate(matching_threads, start=1):
-        embed.add_field(
-            name=f"{idx}. {thread.name}",
-            value=f"[Jump to thread]({thread.jump_url})",
-            inline=False
-        )
-
-    print("Sending results...")
-    await interaction.followup.send(embed=embed)
 
 
 @bot.tree.command(
@@ -2407,10 +2550,12 @@ async def on_ready():
 
     # Add the persistent views
     bot.add_view(ToyboxView())
-    
+    await setup_views()
+
     # Add any existing views here
     bot.add_view(PersistentView(timeout=None))
     print(f'Bot is ready! Logged in as {bot.user.name}')
+    
     
     # Setze den Status des Bots auf "Playing Disney Infinity"
     await bot.change_presence(activity=discord.Game(name="Community Toyboxes"))
