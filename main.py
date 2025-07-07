@@ -1053,7 +1053,15 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
         fields = record.get('fields', {})
         title = fields.get('title', 'Untitled Post')
         description = fields.get('description', 'No description provided')
+        creator_name = fields.get('creator', 'Unknown')  # Get creator from Airtable
         
+        # Format the description with creator info from Airtable
+        formatted_description = (
+            f"{description}\n"
+            "-------------------------------------\n"
+            f"**:art:⎮Creator: {creator_name}**"
+        )
+
         # Handle file with proper type checking
         file_url = None
         if 'file' in fields and fields['file']:
@@ -1109,10 +1117,10 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
         )
         await interaction.edit_original_response(embed=progress_embed)
         
-        # Create thread with attached images
+        # Create thread with attached images using formatted description
         thread_with_message = await forum_channel.create_thread(
             name=title,
-            content=description,
+            content=formatted_description,
             files=image_files if image_files else None,
             reason=f"Post created via command by {interaction.user.name}"
         )
