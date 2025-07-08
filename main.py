@@ -50,7 +50,7 @@ AIRTABLE_TABLES = {
     "72pringle": "72Pringle",
     "jk": "JK"
 }
-FORUM_CHANNEL_ID = 1340461985292226671 
+FORUM_CHANNEL_ID = 1253093395920851054 
 
 # Initialize Airtable connection
 airtable = Api(AIRTABLE_API_KEY)
@@ -263,8 +263,8 @@ class PersistentView(View):
 
 
 
-# First, create a persistent view class outside of the command
-class DownloadView(discord.ui.View):
+# Create separate view classes for each mod type
+class BreezeDownloadView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)  # Button won't timeout
         
@@ -273,15 +273,33 @@ class DownloadView(discord.ui.View):
         style=discord.ButtonStyle.primary,
         custom_id="breeze_download_button"  # Persistent custom_id
     )
-    async def download_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        download_url = "https://drive.google.com/drive/folders/13-h3yzTR9Y4kj9JZqRvINJDPs__R8VE4?usp=drive_link"
+    async def breeze_download_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        download_value = "https://drive.google.com/drive/folders/13-h3yzTR9Y4kj9JZqRvINJDPs__R8VE4"
+        await interaction.response.send_message(
+            f"Here's your download link: {download_value}",
+            ephemeral=True
+        )
+
+class BrownbatDownloadView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)  # Button won't timeout
+        
+    @discord.ui.button(
+        label="Download",
+        style=discord.ButtonStyle.primary,
+        custom_id="brownbat_download_button"  # Persistent custom_id
+    )
+    async def brownbat_download_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        download_url = "https://drive.usercontent.google.com/download?id=1oJnfDwdiOE2xACPMVaMUQzRDXsaBVT0m&export=download&authuser=0"
         await interaction.response.send_message(
             f"Here's your download link: {download_url}",
             ephemeral=True
         )
 
+# Add both views to the bot
 async def setup_views():
-    bot.add_view(DownloadView())  # Add the persistent view
+    bot.add_view(BreezeDownloadView())
+    bot.add_view(BrownbatDownloadView())
 
 bot = commands.Bot(command_prefix="/", intents=intents)
 
@@ -1227,7 +1245,21 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
         )
         await interaction.followup.send(embed=error_embed)
 
-
+@bot.tree.command(name="brownbat_mod", description="Get download link for ThatBrownBat's Mod")
+@discord.app_commands.describe(version="The version number (e.g., 1.0, 1.1)")
+async def brownbat(interaction: discord.Interaction, version: str):
+    embed = discord.Embed(
+        title="Brown Bat Mod Download",
+        description="Welcome to Brown Bat Mod!\nDownload the expansion mod now! 🥳",
+        color=0x8C142E
+    )
+    
+    embed.set_footer(text=f"Made by That Brown Bat (v{version})")
+    
+    await interaction.response.send_message(
+        embed=embed,
+        view=BrownbatDownloadView()
+    )
 
 
 @bot.tree.command(name="breeze", description="Get download links for Breeze")
@@ -1243,11 +1275,34 @@ async def breeze(interaction: discord.Interaction, version: str):
     
     await interaction.response.send_message(
         embed=embed,
-        view=DownloadView()
+        view=BreezeDownloadView()
     )
 
-
-
+@bot.tree.command(name="breeze_video", description="Posts a Breeze video link")
+@app_commands.choices(video_type=[
+    app_commands.Choice(name="Guide Tutorial", value="guide"),
+    app_commands.Choice(name="Error Help", value="error")
+])
+async def breeze_video(interaction: discord.Interaction, video_type: app_commands.Choice[str]):
+    # Set video details based on the selected option
+    if video_type.value == "guide":
+        video_link = "https://youtu.be/xlXahV_enMo?si=4rngyfHSy4tPLyfx"
+        title = "Breeze Guide Video"
+    else:  # error video
+        video_link = "https://www.youtube.com/watch?v=uU__wdl3HVg"
+        title = "Breeze Help Video"
+    
+    # Creating a cleaner, simpler embed
+    embed = discord.Embed(
+        title=title,
+        url=video_link,  # Makes the title itself clickable
+        color=0x148C6A
+    )
+    
+    # Add a footer with a hint
+    embed.set_footer(text="Click the title to watch the video")
+    
+    await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(
     name="count_publish",
@@ -1995,6 +2050,149 @@ class PlayView(discord.ui.View):
         self.children[0].placeholder = "Select number of random Toyboxes"
         await interaction.message.edit(view=self)
 
+
+@bot.tree.command(
+    name="batch_infos",
+    description="Extracts metadata from ZIP files for all records in a specified creator's table"
+)
+@discord.app_commands.choices(
+    creator=[
+        discord.app_commands.Choice(name="Modeltrainman", value="modeltrainman"),
+        discord.app_commands.Choice(name="The Bow-Tie Guy", value="bowtieguy"),
+        discord.app_commands.Choice(name="Allnightgaming", value="allnightgaming"),
+        discord.app_commands.Choice(name="ThatBrownBat", value="thatbrownbat"),
+        discord.app_commands.Choice(name="72Pringle", value="72pringle"),
+        discord.app_commands.Choice(name="JK", value="jk")
+    ]
+)
+async def batch_infos(interaction: discord.Interaction, creator: str):
+    await interaction.response.defer()
+    
+    try:
+        # Create initial progress embed
+        progress_embed = discord.Embed(
+            title="📝 Batch Metadata Extraction",
+            description=f"Processing all records from {AIRTABLE_TABLES[creator]} table",
+            color=0xec4e4e
+        )
+        progress_embed.add_field(
+            name="Status",
+            value="Starting batch process...",
+            inline=False
+        )
+        message = await interaction.followup.send(embed=progress_embed)
+        
+        # Fetch all records from the table
+        records = tables[creator].all()
+        total_records = len(records)
+        processed = 0
+        success = 0
+        failed = 0
+        
+        for record in records:
+            processed += 1
+            try:
+                fields = record.get('fields', {})
+                if 'file' not in fields or not fields['file']:
+                    continue
+
+                file_url = fields['file'][0]['url']
+                
+                # Update progress
+                progress_embed.set_field_at(
+                    0,
+                    name="Status",
+                    value=f"Processing record {processed}/{total_records}\nSuccesses: {success}\nFailures: {failed}",
+                    inline=False
+                )
+                await message.edit(embed=progress_embed)
+                
+                # Create temporary directory for each record
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    file_path = f"{temp_dir}/downloaded.zip"
+                    
+                    # Download file
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(file_url) as response:
+                            if response.status != 200:
+                                failed += 1
+                                continue
+                            file_content = await response.read()
+                    
+                    # Save downloaded file
+                    async with aiofiles.open(file_path, 'wb') as f:
+                        await f.write(file_content)
+
+                    extracted_file_path = None
+                    
+                    # Extract ZIP and find EHRR/EHRA file
+                    with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                        zip_ref.extractall(temp_dir)
+                        
+                        # Search for EHRR or EHRA file
+                        for root, _, files in os.walk(temp_dir):
+                            for file in files:
+                                if file.startswith("EHRR") or file.startswith("EHRA"):
+                                    extracted_file_path = os.path.join(root, file)
+                                    break
+                            if extracted_file_path:
+                                break
+
+                    if not extracted_file_path:
+                        failed += 1
+                        continue
+
+                    # Read and process the file
+                    async with aiofiles.open(extracted_file_path, 'rb') as f:
+                        file_bytes = await f.read()
+
+                    # Decompress and decode data
+                    decompressed_data = zlib.decompress(file_bytes[CONTENT_OFFSET:]).decode('utf-8').rstrip('\x00')
+
+                    # Extract metadata
+                    auth_name_match = re.search(AUTHOREDNAME_PATTERN, decompressed_data)
+                    auth_desc_match = re.search(AUTHOREDDESC_PATTERN, decompressed_data)
+                    date_string_match = re.search(DATESTRING_PATTERN, decompressed_data)
+
+                    # Update Airtable record
+                    update_fields = {}
+
+                    if auth_name_match:
+                        update_fields['Name'] = auth_name_match.group(1)
+
+                    if auth_desc_match:
+                        update_fields['description'] = auth_desc_match.group(1)
+
+                    if update_fields:
+                        tables[creator].update(record['id'], update_fields)
+                        success += 1
+                    else:
+                        failed += 1
+
+            except Exception as e:
+                failed += 1
+                continue
+
+        # Create final success embed
+        final_embed = discord.Embed(
+            title="✅ Batch Processing Complete",
+            description=f"Processed {total_records} records from {AIRTABLE_TABLES[creator]} table",
+            color=0x00ff00
+        )
+        final_embed.add_field(
+            name="Results",
+            value=f"Successfully processed: {success}\nFailed: {failed}",
+            inline=False
+        )
+        await message.edit(embed=final_embed)
+
+    except Exception as e:
+        error_embed = discord.Embed(
+            title="❌ Error",
+            description=f"An error occurred during batch processing: {str(e)}",
+            color=0xff0000
+        )
+        await message.edit(embed=error_embed)
 
 @bot.tree.command(
     name="infos",
