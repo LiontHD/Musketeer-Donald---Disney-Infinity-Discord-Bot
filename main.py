@@ -1054,12 +1054,14 @@ async def post(interaction: discord.Interaction, post_id: str, creator: str):
         title = fields.get('title', 'Untitled Post')
         description = fields.get('description', 'No description provided')
         creator_name = fields.get('creator', 'Unknown')  # Get creator from Airtable
+        video_link = fields.get('videolink', '')  # Get videolink from Airtable
         
-        # Format the description with creator info from Airtable
+        # Format the description with creator info and video link from Airtable
         formatted_description = (
             f"{description}\n"
             "-------------------------------------\n"
-            f"**:art:⎮Creator: {creator_name}**"
+            f"**:art:⎮Creator: {creator_name}**\n"
+            f"**:film_frames:⎮Playthrough video:** {video_link}"
         )
 
         # Handle file with proper type checking
