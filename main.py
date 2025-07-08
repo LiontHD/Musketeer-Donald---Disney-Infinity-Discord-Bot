@@ -26,6 +26,8 @@ from pyairtable import Api
 from typing import Optional
 import requests
 import asyncio 
+import subprocess
+import logging
 
 
 
@@ -1277,6 +1279,155 @@ async def breeze(interaction: discord.Interaction, version: str):
         embed=embed,
         view=BreezeDownloadView()
     )
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("360_to_pc_converter")
+
+@bot.tree.command(name="360_to_pc", description="Convert Xbox 360 format files to PC format")
+@app_commands.describe(file="Upload a zip file containing Xbox 360 format files to convert")
+async def convert_360_to_pc(interaction: discord.Interaction, file: discord.Attachment = None):
+    """
+    Command to convert Xbox 360 format files to PC format.
+    Accepts a zip file upload, processes files using 360toPC.py, and returns converted files as a zip.
+    """
+    # Defer the response since this might take some time
+    await interaction.response.defer()
+
+    # Check if file is provided
+    if not file:
+        return await interaction.followup.send("Please attach a zip file to convert.")
+
+    # Check file extension
+    if not file.filename.lower().endswith('.zip'):
+        return await interaction.followup.send("Please upload a .zip file.")
+
+    # Check file size (10MB limit)
+    if file.size > 10 * 1024 * 1024:
+        return await interaction.followup.send("File too large. Please upload a zip file smaller than 10MB.")
+        
+    original_filename = file.filename  # Store the original filename for later use
+
+    # Create a temporary working directory
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Define paths
+        input_zip_path = os.path.join(temp_dir, "input.zip")
+        extract_dir = os.path.join(temp_dir, "extracted")
+        output_zip_path = os.path.join(temp_dir, "converted.zip")
+        
+        os.makedirs(extract_dir, exist_ok=True)
+        
+        # Download the zip file
+        try:
+            zip_content = await file.read()
+            with open(input_zip_path, 'wb') as f:
+                f.write(zip_content)
+            logger.info(f"Downloaded file: {file.filename}, size: {file.size} bytes")
+            await interaction.followup.send(f"Processing file: {file.filename}", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Error downloading the file: {str(e)}")
+            return await interaction.followup.send(f"Error downloading the file: {str(e)}")
+        
+        # Extract the zip file
+        try:
+            with zipfile.ZipFile(input_zip_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_dir)
+        except Exception as e:
+            return await interaction.followup.send(f"Error extracting the zip file: {str(e)}")
+        
+        # Look for files matching the pattern in the extracted directory
+        rr_files_exist = False
+        for root, _, files in os.walk(extract_dir):
+            for file in files:
+                if "RR" in file:
+                    rr_files_exist = True
+                    break
+            if rr_files_exist:
+                break
+        
+        if not rr_files_exist:
+            return await interaction.followup.send("No matching files found in the zip. Looking for files containing 'RR' in the name.")
+        
+        # Find the actual directory containing the files
+        # This handles the case where zip contains a folder containing the files
+        original_dir = os.getcwd()
+        target_dir = extract_dir
+        
+        # Check if there's a single directory in the extracted content
+        contents = os.listdir(extract_dir)
+        if len(contents) == 1 and os.path.isdir(os.path.join(extract_dir, contents[0])):
+            target_dir = os.path.join(extract_dir, contents[0])
+            await interaction.followup.send(f"Found nested folder: {contents[0]}", ephemeral=True)
+        
+        try:
+            # Copy the script to the target directory
+            script_path = os.path.join(original_dir, "360toPC.py")
+            target_script_path = os.path.join(target_dir, "360toPC.py")
+            shutil.copy2(script_path, target_script_path)
+            
+            # Change to the target directory and run the script
+            os.chdir(target_dir)
+            
+            # List files before conversion
+            files_before = os.listdir(target_dir)
+            matching_files = [f for f in files_before if "RR" in f]
+            
+            if not matching_files:
+                os.chdir(original_dir)
+                return await interaction.followup.send(f"No matching *RR* files found in the directory. Found these files instead: {', '.join(files_before[:10])}")
+                
+            # Run the conversion script
+            await interaction.followup.send(f"Found {len(matching_files)} files to convert. Processing...", ephemeral=True)
+            
+            process = await asyncio.create_subprocess_exec(
+                "python3", target_script_path, "*RR*", "*RR*",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0:
+                os.chdir(original_dir)
+                return await interaction.followup.send(f"Error running the conversion script: {stderr.decode()}")
+                
+            # Change back to original directory
+            os.chdir(original_dir)
+            
+            # Check if the converted_files directory was created
+            # It will be in the target directory, not necessarily directly in extract_dir
+            converted_dir = os.path.join(target_dir, "converted_files")
+            if not os.path.exists(converted_dir) or not os.listdir(converted_dir):
+                return await interaction.followup.send("Conversion process didn't produce any files. Please check if the uploaded files match the expected format.")
+            
+            # Create a new zip file with the converted files
+            with zipfile.ZipFile(output_zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_out:
+                for root, _, files in os.walk(converted_dir):
+                    for file_name in files:
+                        file_path = os.path.join(root, file_name)
+                        arcname = os.path.relpath(file_path, converted_dir)
+                        zip_out.write(file_path, arcname)
+            
+            # Count converted files
+            converted_file_count = sum(len(files) for _, _, files in os.walk(converted_dir))
+            
+            # Send the zip file back to the user
+            with open(output_zip_path, 'rb') as f:
+                output_file = discord.File(fp=io.BytesIO(f.read()), filename=f"converted_{original_filename}")
+                await interaction.followup.send(
+                    content=f"✅ Files converted successfully! Converted {converted_file_count} files. Here's your converted zip file:",
+                    file=output_file
+                )
+                
+            logger.info(f"Successfully converted {converted_file_count} files for {interaction.user.name}")
+                
+        except Exception as e:
+            if os.getcwd() != original_dir:
+                os.chdir(original_dir)
+            await interaction.followup.send(f"An error occurred during conversion: {str(e)}")
+
+
+
+
 
 @bot.tree.command(name="breeze_video", description="Posts a Breeze video link")
 @app_commands.choices(video_type=[
