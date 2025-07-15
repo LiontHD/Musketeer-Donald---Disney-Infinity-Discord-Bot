@@ -1264,6 +1264,153 @@ async def brownbat(interaction: discord.Interaction, version: str):
     )
 
 
+@bot.tree.command(name="change_metadata", description="Modify metadata files by uploading a zip file")
+async def change_metadata(interaction: discord.Interaction, file: discord.Attachment):
+    await interaction.response.send_message("Please upload a zip file containing metadata files. I'll extract, process, and return the modified zip.")
+    
+    def check(message):
+        return message.author == interaction.user and message.attachments and message.attachments[0].filename.endswith('.zip')
+    
+    try:
+        # Wait for user to upload a zip file
+        message = await bot.wait_for('message', check=check, timeout=300.0)  # 5-minute timeout
+        zip_attachment = message.attachments[0]
+        
+        # Create a temporary directory for processing
+        import tempfile
+        import os
+        import zipfile
+        import shutil
+        import subprocess
+        import re
+        import asyncio
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Download the zip file
+            zip_path = os.path.join(temp_dir, zip_attachment.filename)
+            await zip_attachment.save(zip_path)
+            
+            # Extract the zip file
+            extract_dir = os.path.join(temp_dir, "extracted")
+            os.makedirs(extract_dir, exist_ok=True)
+            
+            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_dir)
+            
+            # Find all folders and subfolders recursively
+            target_folder = None
+            metadata_files = []
+            pattern = re.compile(r'^(EHRR|ERR|SCRR|SHRR|SRR)\d+[a-zA-Z]*$')
+            
+            # Walk through all directories to find metadata files
+            for root, dirs, files in os.walk(extract_dir):
+                found_files = [f for f in files if pattern.match(f)]
+                if found_files:
+                    metadata_files = found_files
+                    target_folder = root
+                    break
+                    
+            if not target_folder:
+                await interaction.followup.send("Error: No folder containing metadata files found in the zip structure.")
+                return
+                
+            folder_path = target_folder
+            
+            if not metadata_files:
+                await interaction.followup.send("Error: No metadata files found (EHRR, ERR, SCRR, SHRR, SRR).")
+                return
+            
+            # Choose the EHRR file (or the first matching file if no EHRR)
+            ehrr_files = [f for f in metadata_files if f.startswith("EHRR")]
+            target_file = ehrr_files[0] if ehrr_files else metadata_files[0]
+            
+            # Process the file with inflate.py
+            input_file_path = os.path.join(folder_path, target_file)
+            output_file_path = os.path.join(folder_path, f"{target_file}.dec")
+            
+            # Print debug info
+            await interaction.followup.send(f"Found metadata files: {', '.join(metadata_files)}\nProcessing: {target_file}")
+            
+            try:
+                # Get the absolute path to inflate.py in the same directory as the bot script
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                inflate_script = os.path.join(script_dir, "inflate.py")
+                
+                # Run the inflate.py script
+                subprocess.run(
+                    ["python3", inflate_script, "-d", input_file_path, output_file_path],
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+                
+                # Send the decoded file to the user
+                await interaction.followup.send(
+                    f"I've processed file `{target_file}`. Please edit the content and upload the modified file.",
+                    file=discord.File(output_file_path)
+                )
+                
+                # Wait for the user to send back the modified file
+                def modified_check(msg):
+                    return msg.author == interaction.user and msg.attachments
+                
+                modified_msg = await bot.wait_for('message', check=modified_check, timeout=600.0)  # 10-minute timeout
+                modified_attachment = modified_msg.attachments[0]
+                modified_file_path = os.path.join(temp_dir, modified_attachment.filename)
+                await modified_attachment.save(modified_file_path)
+                
+                # Remove the original file
+                os.remove(input_file_path)
+                
+                # Compress the modified file
+                compressed_path = os.path.join(folder_path, target_file)
+                subprocess.run(
+                    ["python3", inflate_script, "-c", modified_file_path, compressed_path],
+                    check=True,
+                    capture_output=True, 
+                    text=True
+                )
+                
+                # Create a new zip file
+                new_zip_path = os.path.join(temp_dir, f"modified_{zip_attachment.filename}")
+                
+                with zipfile.ZipFile(new_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    # Add all files from the folder to the zip
+                    for root, dirs, files in os.walk(folder_path):
+                        for file in files:
+                            # Skip .dec files
+                            if file.endswith('.dec'):
+                                continue
+                            file_path = os.path.join(root, file)
+                            arcname = os.path.relpath(file_path, extract_dir)
+                            zipf.write(file_path, arcname)
+                
+                # Send the modified zip back to the user
+                await interaction.followup.send(
+                    f"Here's your modified zip file with updated metadata:",
+                    file=discord.File(new_zip_path)
+                )
+                
+            except subprocess.CalledProcessError as e:
+                await interaction.followup.send(f"Error processing file: {e}")
+            except Exception as e:
+                await interaction.followup.send(f"An error occurred: {e}")
+    
+    except asyncio.TimeoutError:
+        await interaction.followup.send("Timed out waiting for file upload.")
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred: {e}")
+
+
+
+
+
+
+
+
+
+
+
 @bot.tree.command(name="breeze", description="Get download links for Breeze")
 @discord.app_commands.describe(version="The version number (e.g., 1.0, 1.1)")
 async def breeze(interaction: discord.Interaction, version: str):
@@ -1286,7 +1433,7 @@ logger = logging.getLogger("360_to_pc_converter")
 
 @bot.tree.command(name="360_to_pc", description="Convert Xbox 360 format files to PC format")
 @app_commands.describe(file="Upload a zip file containing Xbox 360 format files to convert")
-async def convert_360_to_pc(interaction: discord.Interaction, file: discord.Attachment = None):
+async def convert_360_to_pc(interaction: discord.Interaction, file: discord.Attachment):
     """
     Command to convert Xbox 360 format files to PC format.
     Accepts a zip file upload, processes files using 360toPC.py, and returns converted files as a zip.
