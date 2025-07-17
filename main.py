@@ -1266,16 +1266,27 @@ async def brownbat(interaction: discord.Interaction, version: str):
 
 @bot.tree.command(name="change_metadata", description="Modify metadata files by uploading a zip file")
 async def change_metadata(interaction: discord.Interaction, file: discord.Attachment):
-    await interaction.response.send_message("Please upload a zip file containing metadata files. I'll extract, process, and return the modified zip.")
-    
-    def check(message):
-        return message.author == interaction.user and message.attachments and message.attachments[0].filename.endswith('.zip')
+    # Überprüfen, ob eine Datei angehängt wurde
+    if file and file.filename.endswith('.zip'):
+        # Wenn eine Zip-Datei angehängt wurde, verwende diese direkt
+        zip_attachment = file
+        await interaction.response.send_message(f"Verarbeite Ihre Zip-Datei: {zip_attachment.filename}...")
+    else:
+        # Wenn keine Datei angehängt wurde oder keine Zip-Datei, fordere eine an
+        await interaction.response.send_message("Please upload a zip file containing metadata files. I'll extract, process, and return the modified zip.")
+        
+        def check(message):
+            return message.author == interaction.user and message.attachments and message.attachments[0].filename.endswith('.zip')
+        
+        try:
+            # Wait for user to upload a zip file
+            message = await bot.wait_for('message', check=check, timeout=300.0)  # 5-minute timeout
+            zip_attachment = message.attachments[0]
+        except asyncio.TimeoutError:
+            await interaction.followup.send("Timed out waiting for file upload.")
+            return
     
     try:
-        # Wait for user to upload a zip file
-        message = await bot.wait_for('message', check=check, timeout=300.0)  # 5-minute timeout
-        zip_attachment = message.attachments[0]
-        
         # Create a temporary directory for processing
         import tempfile
         import os
@@ -1396,8 +1407,6 @@ async def change_metadata(interaction: discord.Interaction, file: discord.Attach
             except Exception as e:
                 await interaction.followup.send(f"An error occurred: {e}")
     
-    except asyncio.TimeoutError:
-        await interaction.followup.send("Timed out waiting for file upload.")
     except Exception as e:
         await interaction.followup.send(f"An error occurred: {e}")
 
