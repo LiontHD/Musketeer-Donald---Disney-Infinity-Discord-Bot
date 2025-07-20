@@ -15,7 +15,6 @@ import zlib
 import tempfile
 from difflib import SequenceMatcher
 import networkx as nx
-from thefuzz import fuzz
 from discord import ForumChannel
 from typing import List, Dict
 from collections import defaultdict
@@ -28,7 +27,10 @@ import requests
 import asyncio 
 import subprocess
 import logging
-
+import google.generativeai as genai
+from thefuzz import fuzz, process
+from typing import Union
+import traceback
 
 
 # Discord Bot Token
@@ -36,6 +38,20 @@ load_dotenv()  # lädt die Variablen aus der .env Datei
 TOKEN = os.getenv('BOT_TOKEN')
 AIRTABLE_API_KEY = os.getenv('AIRTABLE_API_KEY')
 AIRTABLE_BASE_ID = os.getenv('AIRTABLE_BASE_ID')
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+knowledge_base_file = "knowledge_base.json"
+toybox_data_file = "toybox_data.json"
+
+gemini_model = None
+if GEMINI_API_KEY:
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        gemini_model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        print("✅ Google Gemini Initialized.")
+    except Exception as e:
+        print(f"⚠️ Error initializing Google Gemini: {e}. AI features will be disabled.")
+else:
+    print("⚠️ Warning: GEMINI_API_KEY not found in .env file. AI features will be disabled.")
 
 # Bot-Einstellungen
 intents = discord.Intents.default()
@@ -50,7 +66,8 @@ AIRTABLE_TABLES = {
     "allnightgaming": "Allnightgaming",
     "thatbrownbat": "ThatBrownBat",
     "72pringle": "72Pringle",
-    "jk": "JK"
+    "jk": "JK",
+    "misc": "Misc"
 }
 FORUM_CHANNEL_ID = 1253093395920851054 
 
@@ -71,6 +88,58 @@ print(response.json())  # Gibt zurück, was Airtable tatsächlich liefert
 
 
 VALID_TAGS = ["Disney", "Marvel", "Star Wars", "Other"]
+
+class AskToyboxPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Start chat", style=discord.ButtonStyle.primary, custom_id="ask_toybox_start_chat")
+    async def start_chat_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            if not isinstance(interaction.channel, (discord.TextChannel, discord.ForumChannel)):
+                await interaction.followup.send("Sorry, I can only start chats in regular text channels or forum channels.", ephemeral=True)
+                return
+            thread_name = f"Toybox Chat with {interaction.user.display_name[:50]}"
+            bot_member = interaction.guild.me
+            channel_perms = interaction.channel.permissions_for(bot_member)
+            if not channel_perms.create_private_threads:
+                await interaction.followup.send("I don't have permission to create private threads in this channel.", ephemeral=True)
+                return
+            if not channel_perms.send_messages_in_threads:
+                await interaction.followup.send("I don't have permission to send messages in threads here.", ephemeral=True)
+                return
+            new_thread = await interaction.channel.create_thread(
+                name=thread_name,
+                type=discord.ChannelType.private_thread,
+                auto_archive_duration=1440,
+                reason=f"Toybox AI chat initiated by {interaction.user.name}"
+            )
+            await new_thread.add_user(interaction.user)
+            welcome_embed = discord.Embed(
+                title="🦆 Find a Toybox with AI 🦆",
+                description=(
+                    f"Hi {interaction.user.mention}! I'm Donald Duck, ready to help you find the perfect Toybox adventure! 🎮\n\n"
+                    f"**Tell me what you're looking for today:**\n"
+                    f"• A specific character (like Iron Man or Stitch)\n"
+                    f"• A type of game (racing, platformer, combat)\n"
+                    f"• A franchise (Star Wars, Marvel Avengers)\n"
+                    f"• Or any other ideas you have!"
+                ),
+                color=discord.Color.from_rgb(59, 136, 195)
+            )
+            await new_thread.send(embed=welcome_embed)
+            await interaction.followup.send(f"I've started a private chat for you here: {new_thread.mention}", ephemeral=True)
+        except Exception as e:
+            print(f"Error in start_chat_button callback: {e}")
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("Sorry, something went wrong while trying to start the chat.", ephemeral=True)
+                else:
+                    await interaction.followup.send("Sorry, something went wrong while trying to start the chat.", ephemeral=True)
+            except Exception as final_e:
+                print(f"Error sending final error message in start_chat_button: {final_e}")
+
 
 class ToyboxCounter:
     def __init__(self):
@@ -416,7 +485,120 @@ class RatingView(discord.ui.View):
 
 
 
+# --- RAG Helper Function ---
+# *** Angepasste Gewichtung und möglicherweise andere Name-Matching-Methode ***
+def find_relevant_toyboxes(query: str, toybox_data: List[Dict], expansion_keywords: set, max_results: int = 20) -> List[Dict]:
+    """Finds relevant toyboxes using fuzzy matching and direct keyword checks with adjusted weights."""
+    if not toybox_data:
+        return []
+    query_lower = query.lower()
+    scores = []
+    print(f"--- Starting find_relevant_toyboxes ---")
+    print(f"Searching for query (len {len(query_lower.split())}): '{query_lower[:150]}...'")
+    print(f"Using expansion keywords: {expansion_keywords}")
 
+    processed_count = 0
+    for toybox in toybox_data:
+        processed_count += 1
+        toybox_name = toybox.get("name", "N/A")
+        toybox_name_lower = toybox_name.lower()
+        toybox_desc = toybox.get("description", "")
+        toybox_desc_lower = toybox_desc.lower()
+
+        # === Name Match Score ===
+        # Behalte token_set_ratio, da es gut ist, aber gib ihm mehr Gewicht.
+        name_match_score_raw = fuzz.token_set_ratio(query_lower, toybox_name_lower)
+        # ALTERNATIVE (Testen!): partial_ratio könnte besser sein, um zu prüfen, ob der KURZE Name im LANGEN Query enthalten ist.
+        # name_match_score_raw = fuzz.partial_ratio(toybox_name_lower, query_lower) # Reihenfolge wichtig!
+
+        # === Tag Match Score ===
+        tag_match_points = 0
+        query_words = set(query_lower.split())
+        tags_lower = [tag.lower() for tag in toybox.get("tags", [])]
+        # Prüfe NUR noch, ob explizite Tags der Toybox mit Query-Wörtern übereinstimmen.
+        # Entferne die Prüfung 'tag in query_lower', da dies zu viele unspezifische Treffer gibt.
+        # Gib Punkte nur für spezifische Übereinstimmungen.
+        tag_hits = 0
+        matched_tags = []
+        if any(q_word in tag for tag in tags_lower for q_word in query_words):
+             tag_hits = 1 # Es gibt einen Treffer
+             # Optional: zähle, wie viele Keywords in den Tags vorkommen? Kann komplex werden.
+             # matched_tags = [tag for tag in tags_lower if any(qw in tag for qw in query_words)]
+
+
+        # === Description Match Score ===
+        desc_match_score_raw = fuzz.partial_ratio(query_lower, toybox_desc_lower)
+
+        # === Direkter Keyword-Boost (wenn Query Expansion stattfand) ===
+        direct_keyword_boost = 0
+        keyword_hits_in_name = 0
+        keyword_hits_in_desc = 0
+        matched_keywords_in_name = []
+        if expansion_keywords:
+            name_hit = False
+            desc_hit = False
+            for kw in expansion_keywords:
+                # *** Verwende partial_ratio für Keyword im Namen/Beschreibung ***
+                # Das ist robuster gegen leichte Variationen als 'in'. Score > 90 ist quasi ein Treffer.
+                if fuzz.partial_ratio(kw, toybox_name_lower) > 90:
+                    keyword_hits_in_name += 1
+                    matched_keywords_in_name.append(kw)
+                    name_hit = True
+                if fuzz.partial_ratio(kw, toybox_desc_lower) > 90:
+                    keyword_hits_in_desc += 1
+                    desc_hit = True
+
+            # Boost-Logik (behalte bei +40 / +15)
+            if name_hit:
+                direct_keyword_boost += 40
+            elif desc_hit:
+                direct_keyword_boost += 15
+
+        # === Combine Scores (ANGEPASSTE GEWICHTE) ===
+        # - Name: Höheres Gewicht, da der Titel wichtiger ist.
+        # - Tag: Geringeres Gewicht für den ALLGEMEINEN Tag-Match (Treffer Ja/Nein).
+        # - Desc: Mittleres Gewicht.
+        # - KW Boost: Additiv, stark, wenn vorhanden.
+        name_weight = 0.8  # Starkes Gewicht für Namensähnlichkeit
+        tag_weight = 0.3   # Reduziertes Gewicht für bloße Tag-Übereinstimmung
+        desc_weight = 0.5  # Mittleres Gewicht für Beschreibung
+        tag_max_points = 60 # Maximalpunkte für Tag-Übereinstimmung (statt 85)
+
+        name_weighted = name_match_score_raw * name_weight
+        # Berechne Tag-Score anders: Wenn es einen Hit gab, gib tag_max_points * tag_weight Punkte.
+        tag_weighted = (tag_max_points * tag_weight) if tag_hits > 0 else 0
+        # Optional komplexer: Gewichte die Anzahl der Tag-Hits? z.B. min(tag_hits, 3) * (tag_max_points/3 * tag_weight)
+        desc_weighted = desc_match_score_raw * desc_weight
+
+        combined_score = name_weighted + tag_weighted + desc_weighted + direct_keyword_boost
+
+        relevance_threshold = 65
+        # *** DETAILLIERTER DEBUG OUTPUT ***
+        if combined_score > 50 or "guardians" in toybox_name_lower or "galaxy" in toybox_name_lower or "dagobah" in toybox_name_lower :
+             print(f"\n-- Toybox: '{toybox_name}' (ID: {toybox.get('id')}) --")
+             print(f"   Name Match: {name_match_score_raw:.1f} -> Weighted: {name_weighted:.1f} (Weight: {name_weight})")
+             print(f"   Tag Match: {tag_hits} hit(s) -> Weighted: {tag_weighted:.1f} (Weight: {tag_weight}, MaxPts: {tag_max_points}) (Tags: {toybox.get('tags')})")
+             print(f"   Desc Match: {desc_match_score_raw:.1f} -> Weighted: {desc_weighted:.1f} (Weight: {desc_weight})")
+             if expansion_keywords:
+                 print(f"   KW Boost: {direct_keyword_boost:.1f} (Name Hits: {keyword_hits_in_name} {matched_keywords_in_name}, Desc Hits: {keyword_hits_in_desc})")
+             else:
+                  print(f"   KW Boost: N/A")
+             print(f"   ===> TOTAL SCORE: {combined_score:.1f} (Threshold: {relevance_threshold})")
+
+        if combined_score >= relevance_threshold:
+            scores.append((combined_score, toybox))
+
+    print(f"--- Finished find_relevant_toyboxes ({processed_count} items processed) ---")
+    scores.sort(key=lambda item: item[0], reverse=True)
+
+    print(f"--- Top Scores (up to 30) ---")
+    for i, (score, tb) in enumerate(scores[:30]):
+        print(f"   {i+1}. {score:.1f} - '{tb.get('name')}' (ID: {tb.get('id')})")
+    print(f"--------------------------")
+
+    top_results = [toybox for score, toybox in scores[:max_results]] # Verwende ursprüngliches max_results hier
+    print(f"Found {len(scores)} toyboxes passing threshold {relevance_threshold} (returning top {max_results}).") # Logge alle gefundenen
+    return top_results
 
 
 
@@ -1026,7 +1208,50 @@ async def download_file(url: str) -> io.BytesIO:
                 return io.BytesIO(await response.read())
     return None
 
+@bot.tree.command(name="create_ask_panel", description="ADMIN: Creates the panel to start an AI Toybox chat.")
+@app_commands.checks.has_permissions(administrator=True)
+async def create_ask_panel(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🎮 Disney Infinity Toybox Finder",
+        description=(
+            "### Hey there, I'm **Donald Duck**! 🦆\n\n"
+            "I can help you discover the perfect Toybox from our community collection.\n"
+            "Whether you're looking for Marvel heroes, Star Wars adventures, or Disney magic, "
+            "I've got you covered!\n\n"
+            "**Click the button below to start a private chat with me!**"
+        ),
+        color=discord.Color.from_rgb(59, 136, 195)
+    )
+    embed.set_thumbnail(url="https://i.imgur.com/yfgwrcN.png")
+    embed.add_field(
+        name="🔍 What can I help you find?",
+        value="• Star Wars adventures\n• Marvel combat arenas\n• Disney character worlds\n• Racing or platformer games",
+        inline=False
+    )
+    embed.set_footer(text="Powered by Toybox AI Assistant", icon_url="https://i.imgur.com/L1Yk5rV.png")
+    view = AskToyboxPanelView()
+    await interaction.response.send_message(embed=embed, view=view)
 
+
+
+
+
+
+@bot.tree.command(name="update_toyboxes", description="ADMIN: Manually update the toybox search database.")
+@app_commands.checks.has_permissions(administrator=True)
+async def update_toyboxes_cmd(interaction: discord.Interaction):
+    if not interaction.guild:
+        await interaction.response.send_message("This command must be used in a server.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    # Your update_toybox_database logic here
+    # After updating, reload bot.toybox_data
+    try:
+        with open(toybox_data_file, "r", encoding='utf-8') as f:
+            bot.toybox_data = json.load(f)
+        await interaction.followup.send(f"✅ Toybox database update complete. ({len(bot.toybox_data)} entries loaded).", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send("❌ Toybox database update failed. Check bot logs for details.", ephemeral=True)
 
 @bot.tree.command(name="post", description="Create a forum post from Airtable data")
 @discord.app_commands.choices(
@@ -1036,6 +1261,7 @@ async def download_file(url: str) -> io.BytesIO:
         discord.app_commands.Choice(name="Allnightgaming", value="allnightgaming"),
         discord.app_commands.Choice(name="ThatBrownBat", value="thatbrownbat"),
         discord.app_commands.Choice(name="72Pringle", value="72pringle"),
+        discord.app_commands.Choice(name="Misc", value="misc"),
         discord.app_commands.Choice(name="JK", value="jk")
     ]
 )
@@ -1264,151 +1490,249 @@ async def brownbat(interaction: discord.Interaction, version: str):
     )
 
 
-@bot.tree.command(name="change_metadata", description="Modify metadata files by uploading a zip file")
+@bot.tree.command(name="change_metadata", description="Modifies metadata files by uploading a ZIP file")
 async def change_metadata(interaction: discord.Interaction, file: discord.Attachment):
-    # Überprüfen, ob eine Datei angehängt wurde
-    if file and file.filename.endswith('.zip'):
-        # Wenn eine Zip-Datei angehängt wurde, verwende diese direkt
-        zip_attachment = file
-        await interaction.response.send_message(f"Verarbeite Ihre Zip-Datei: {zip_attachment.filename}...")
-    else:
-        # Wenn keine Datei angehängt wurde oder keine Zip-Datei, fordere eine an
-        await interaction.response.send_message("Please upload a zip file containing metadata files. I'll extract, process, and return the modified zip.")
-        
-        def check(message):
-            return message.author == interaction.user and message.attachments and message.attachments[0].filename.endswith('.zip')
-        
-        try:
-            # Wait for user to upload a zip file
-            message = await bot.wait_for('message', check=check, timeout=300.0)  # 5-minute timeout
-            zip_attachment = message.attachments[0]
-        except asyncio.TimeoutError:
-            await interaction.followup.send("Timed out waiting for file upload.")
-            return
+    # 1. Defer interaction to allow time for processing
+    await interaction.response.defer(ephemeral=False) # ephemeral=False, so the message is visible to everyone
+
+    # 2. Create initial embed
+    embed = discord.Embed(
+        title="🔄 Modifying Metadata",
+        description=f"Processing your ZIP file: `{file.filename}`...",
+        color=discord.Color.blue() # A neutral color to start
+    )
+    embed.add_field(name="Progress", value="Initializing...", inline=False)
     
-    try:
-        # Create a temporary directory for processing
-        import tempfile
-        import os
-        import zipfile
-        import shutil
-        import subprocess
-        import re
-        import asyncio
+    # Send the initial embed and store the message for later edits
+    progress_message = await interaction.followup.send(embed=embed)
+
+    # Helper function to update the embed
+    async def update_embed(status_text: str, title: str = None, description: str = None, color: discord.Color = None, attachment_to_send: discord.File = None, clear_fields: bool = False):
+        if title:
+            embed.title = title
+        if description is not None: # Allow empty descriptions to clear them
+            embed.description = description
+        if color:
+            embed.color = color
         
+        if clear_fields:
+            embed.clear_fields()
+            # If fields were cleared but a new status is present, re-add the progress field
+            if status_text:
+                 embed.add_field(name="Progress", value=status_text, inline=False)
+        elif embed.fields: # Only update if fields exist
+            embed.set_field_at(0, name="Progress", value=status_text, inline=False)
+        else: # If no fields exist (e.g., after clear_fields without new status_text)
+            embed.add_field(name="Progress", value=status_text, inline=False)
+            
+        attachments_list = [attachment_to_send] if attachment_to_send else discord.utils.MISSING
+        await progress_message.edit(embed=embed, attachments=attachments_list)
+
+    # 3. File validation
+    if not file or not file.filename.endswith('.zip'):
+        await update_embed(
+            status_text="Upload Error.",
+            title="❌ Error",
+            description="Please ensure you are uploading a `.zip` file.",
+            color=discord.Color.red()
+        )
+        return
+
+    try:
+        # 4. Create temporary directory for processing
         with tempfile.TemporaryDirectory() as temp_dir:
-            # Download the zip file
-            zip_path = os.path.join(temp_dir, zip_attachment.filename)
-            await zip_attachment.save(zip_path)
+            zip_path = os.path.join(temp_dir, file.filename)
             
-            # Extract the zip file
-            extract_dir = os.path.join(temp_dir, "extracted")
+            await update_embed(status_text=f"📥 Downloading `{file.filename}`...")
+            await file.save(zip_path)
+            
+            extract_dir = os.path.join(temp_dir, "extracted_files")
             os.makedirs(extract_dir, exist_ok=True)
-            
+            await update_embed(status_text=f"🗂️ Extracting `{file.filename}`...")
             with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                 zip_ref.extractall(extract_dir)
             
-            # Find all folders and subfolders recursively
+            # Find metadata files
             target_folder = None
             metadata_files = []
+            # Regex pattern for metadata filenames
             pattern = re.compile(r'^(EHRR|ERR|SCRR|SHRR|SRR)\d+[a-zA-Z]*$')
             
-            # Walk through all directories to find metadata files
-            for root, dirs, files in os.walk(extract_dir):
-                found_files = [f for f in files if pattern.match(f)]
+            await update_embed(status_text="🔎 Searching for metadata files...")
+            for root, dirs, files_in_root in os.walk(extract_dir):
+                found_files = [f for f in files_in_root if pattern.match(f)]
                 if found_files:
                     metadata_files = found_files
-                    target_folder = root
-                    break
-                    
+                    target_folder = root # The folder where the files were found
+                    break # Stop as soon as the first folder with matching files is found
+            
             if not target_folder:
-                await interaction.followup.send("Error: No folder containing metadata files found in the zip structure.")
+                await update_embed(
+                    status_text="No folder containing metadata files found.",
+                    title="❌ Error",
+                    description="Could not find a folder containing metadata files (EHRR, ERR, etc.).",
+                    color=discord.Color.red()
+                )
                 return
                 
-            folder_path = target_folder
-            
             if not metadata_files:
-                await interaction.followup.send("Error: No metadata files found (EHRR, ERR, SCRR, SHRR, SRR).")
+                await update_embed(
+                    status_text="No metadata files found.",
+                    title="❌ Error",
+                    description="No metadata files (EHRR, ERR, SCRR, SHRR, SRR) found in the ZIP file.",
+                    color=discord.Color.red()
+                )
                 return
             
-            # Choose the EHRR file (or the first matching file if no EHRR)
+            # Select EHRR file or the first found file
             ehrr_files = [f for f in metadata_files if f.startswith("EHRR")]
-            target_file = ehrr_files[0] if ehrr_files else metadata_files[0]
+            target_file_name = ehrr_files[0] if ehrr_files else metadata_files[0]
             
-            # Process the file with inflate.py
-            input_file_path = os.path.join(folder_path, target_file)
-            output_file_path = os.path.join(folder_path, f"{target_file}.dec")
+            await update_embed(
+                status_text=f"🎯 Target file: `{target_file_name}`.\nFound files: `{', '.join(metadata_files)}`"
+            )
             
-            # Print debug info
-            await interaction.followup.send(f"Found metadata files: {', '.join(metadata_files)}\nProcessing: {target_file}")
+            input_file_path = os.path.join(target_folder, target_file_name)
+            decoded_output_file_name = f"{target_file_name}.dec"
+            decoded_output_file_path = os.path.join(target_folder, decoded_output_file_name)
             
+            # Path to the inflate.py script (assuming it's in the same directory as the bot script)
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            inflate_script_path = os.path.join(script_dir, "inflate.py")
+
+            if not os.path.exists(inflate_script_path):
+                await update_embed("Internal error.", title="❌ Script Not Found", description=f"The script `inflate.py` was not found at: `{inflate_script_path}`", color=discord.Color.red())
+                return
+
+            # Decompress file with inflate.py
+            await update_embed(status_text=f"⚙️ Decompressing `{target_file_name}`...")
+            decompress_process = subprocess.run(
+                ["python3", inflate_script_path, "-d", input_file_path, decoded_output_file_path],
+                capture_output=True, text=True, check=False # check=False to handle errors manually
+            )
+
+            if decompress_process.returncode != 0:
+                await update_embed("Decompression error.", title="❌ Processing Error", description=f"Error executing inflate.py (decompress):\n```\n{decompress_process.stderr or decompress_process.stdout}\n```", color=discord.Color.red())
+                return
+            
+            # Send the decompressed file to the user in a NEW message
+            # The embed cannot directly attach a file for an intermediate step and then be further edited.
+            await update_embed(
+                status_text=f"📤 `{decoded_output_file_name}` sent.",
+                description=(
+                    f"The file `{target_file_name}` has been decompressed to `{decoded_output_file_name}`.\n"
+                    "**Please edit the `.dec` file and then upload it here in this channel.**"
+                )
+            )
+            dec_file_message = await interaction.channel.send(
+                content=f"Here is the decompressed file (`{decoded_output_file_name}`) for editing:",
+                file=discord.File(decoded_output_file_path)
+            )
+            
+            # Wait for the user to upload the edited file
+            def check_modified_file(message_from_user: discord.Message):
+                return (message_from_user.author == interaction.user and 
+                        message_from_user.channel == interaction.channel and
+                        message_from_user.attachments and 
+                        message_from_user.attachments[0].filename.endswith('.dec')) # Ensure it's a .dec file
+
             try:
-                # Get the absolute path to inflate.py in the same directory as the bot script
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                inflate_script = os.path.join(script_dir, "inflate.py")
-                
-                # Run the inflate.py script
-                subprocess.run(
-                    ["python3", inflate_script, "-d", input_file_path, output_file_path],
-                    check=True,
-                    capture_output=True,
-                    text=True
+                await update_embed(
+                    status_text=f"⏳ Waiting for upload of the edited `{decoded_output_file_name}` (Timeout: 10 minutes)...",
+                    description= ( # Repeat the instruction in case the user scrolls up
+                        f"Please upload the edited version of `{decoded_output_file_name}` now."
+                    )
                 )
+                modified_message = await bot.wait_for('message', check=check_modified_file, timeout=600.0) # 10 minute timeout
+                modified_attachment = modified_message.attachments[0]
+                modified_file_temp_path = os.path.join(temp_dir, modified_attachment.filename) # Secure temporary path
+                await modified_attachment.save(modified_file_temp_path)
                 
-                # Send the decoded file to the user
-                await interaction.followup.send(
-                    f"I've processed file `{target_file}`. Please edit the content and upload the modified file.",
-                    file=discord.File(output_file_path)
+                await update_embed(status_text=f"📥 Edited file `{modified_attachment.filename}` received.")
+
+                # Optional: Clean up old messages
+                try:
+                    await dec_file_message.delete()
+                    await modified_message.delete()
+                except discord.HTTPException:
+                    pass # Ignore errors if messages are already gone or permissions are missing
+
+            except asyncio.TimeoutError:
+                await update_embed(
+                    status_text="Time expired.",
+                    title="⏰ Timeout",
+                    description="The time for uploading the edited file has expired.",
+                    color=discord.Color.orange()
                 )
-                
-                # Wait for the user to send back the modified file
-                def modified_check(msg):
-                    return msg.author == interaction.user and msg.attachments
-                
-                modified_msg = await bot.wait_for('message', check=modified_check, timeout=600.0)  # 10-minute timeout
-                modified_attachment = modified_msg.attachments[0]
-                modified_file_path = os.path.join(temp_dir, modified_attachment.filename)
-                await modified_attachment.save(modified_file_path)
-                
-                # Remove the original file
+                return
+            
+            # Remove the old (uncompressed) .dec file and the original compressed file
+            if os.path.exists(decoded_output_file_path):
+                 os.remove(decoded_output_file_path)
+            if os.path.exists(input_file_path):
                 os.remove(input_file_path)
-                
-                # Compress the modified file
-                compressed_path = os.path.join(folder_path, target_file)
-                subprocess.run(
-                    ["python3", inflate_script, "-c", modified_file_path, compressed_path],
-                    check=True,
-                    capture_output=True, 
-                    text=True
-                )
-                
-                # Create a new zip file
-                new_zip_path = os.path.join(temp_dir, f"modified_{zip_attachment.filename}")
-                
-                with zipfile.ZipFile(new_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                    # Add all files from the folder to the zip
-                    for root, dirs, files in os.walk(folder_path):
-                        for file in files:
-                            # Skip .dec files
-                            if file.endswith('.dec'):
-                                continue
-                            file_path = os.path.join(root, file)
-                            arcname = os.path.relpath(file_path, extract_dir)
-                            zipf.write(file_path, arcname)
-                
-                # Send the modified zip back to the user
-                await interaction.followup.send(
-                    f"Here's your modified zip file with updated metadata:",
-                    file=discord.File(new_zip_path)
-                )
-                
-            except subprocess.CalledProcessError as e:
-                await interaction.followup.send(f"Error processing file: {e}")
-            except Exception as e:
-                await interaction.followup.send(f"An error occurred: {e}")
-    
+            
+            # Compress the modified file back to the original target file location
+            # The name of the compressed file should be `target_file_name` again
+            compressed_output_path = os.path.join(target_folder, target_file_name)
+            await update_embed(status_text=f"⚙️ Compressing `{modified_attachment.filename}` to `{target_file_name}`...")
+            compress_process = subprocess.run(
+                ["python3", inflate_script_path, "-c", modified_file_temp_path, compressed_output_path],
+                capture_output=True, text=True, check=False
+            )
+
+            if compress_process.returncode != 0:
+                await update_embed("Compression error.", title="❌ Processing Error", description=f"Error executing inflate.py (compress):\n```\n{compress_process.stderr or compress_process.stdout}\n```", color=discord.Color.red())
+                return
+            
+            # Create a new ZIP file with the modified contents
+            modified_zip_filename = f"modified_{file.filename}"
+            modified_zip_path = os.path.join(temp_dir, modified_zip_filename)
+            
+            await update_embed(status_text=f"🤐 Creating new ZIP file `{modified_zip_filename}`...")
+            with zipfile.ZipFile(modified_zip_path, 'w', zipfile.ZIP_DEFLATED) as new_zip:
+                # Traverse `extract_dir` (not `target_folder`) to maintain the original structure
+                for root, dirs, files_in_root in os.walk(extract_dir):
+                    for item_name in files_in_root:
+                        # Skip temporary .dec files that were not part of the original ZIP
+                        if item_name.endswith('.dec') and item_name != decoded_output_file_name : # Don't keep the .dec file just processed
+                             if item_name == os.path.basename(modified_file_temp_path): # Also not the uploaded .dec
+                                 continue
+                        
+                        item_path = os.path.join(root, item_name)
+                        # arcname is the path inside the ZIP file
+                        arcname = os.path.relpath(item_path, extract_dir)
+                        new_zip.write(item_path, arcname)
+            
+            # Send the modified ZIP file back
+            final_zip_file = discord.File(modified_zip_path, filename=modified_zip_filename)
+            await update_embed(
+                status_text="Completed!",
+                title="✅ Done!",
+                description=f"Here is your modified ZIP file `{modified_zip_filename}`.",
+                color=discord.Color.green(),
+                attachment_to_send=final_zip_file,
+                clear_fields=True # Removes the "Progress" field for the final message
+            )
+
+    except subprocess.CalledProcessError as e:
+        error_details = f"Exit Code: {e.returncode}\nStdout: {e.stdout}\nStderr: {e.stderr}"
+        await update_embed("Error during external script execution.", title="❌ System Error", description=f"Error processing with an external script:\n```\n{error_details}\n```", color=discord.Color.red())
+    except FileNotFoundError as e: # Catches e.g., if python3 is not found
+        await update_embed("File or program not found.", title="❌ System Error", description=f"A required program or file was not found: {e}", color=discord.Color.red())
     except Exception as e:
-        await interaction.followup.send(f"An error occurred: {e}")
+        import traceback
+        trace_str = traceback.format_exc()
+        print(f"An unexpected error occurred in the 'change_metadata' command:\n{trace_str}")
+        await update_embed(
+            status_text="An unexpected error occurred.",
+            title="❌ Unexpected Error",
+            description=f"An internal error occurred. The bot administrator has been notified.\nError type: `{type(e).__name__}`",
+            color=discord.Color.dark_red()
+        )
+    finally:
+        # Temp directory is automatically deleted by the 'with' statement
+        pass
 
 
 
@@ -1582,7 +1906,150 @@ async def convert_360_to_pc(interaction: discord.Interaction, file: discord.Atta
             await interaction.followup.send(f"An error occurred during conversion: {str(e)}")
 
 
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("wiiu_to_pc_converter")
 
+@bot.tree.command(name="wiiu_to_pc_converter", description="Convert wii u format files to PC format")
+@app_commands.describe(file="Upload a zip file containing wii u format files to convert")
+async def convert_360_to_pc(interaction: discord.Interaction, file: discord.Attachment):
+    """
+    Command to convert wii u format files to PC format.
+    Accepts a zip file upload, processes files using 360toPC.py, and returns converted files as a zip.
+    """
+    # Defer the response since this might take some time
+    await interaction.response.defer()
+
+    # Check if file is provided
+    if not file:
+        return await interaction.followup.send("Please attach a zip file to convert.")
+
+    # Check file extension
+    if not file.filename.lower().endswith('.zip'):
+        return await interaction.followup.send("Please upload a .zip file.")
+
+    # Check file size (10MB limit)
+    if file.size > 10 * 1024 * 1024:
+        return await interaction.followup.send("File too large. Please upload a zip file smaller than 10MB.")
+        
+    original_filename = file.filename  # Store the original filename for later use
+
+    # Create a temporary working directory
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Define paths
+        input_zip_path = os.path.join(temp_dir, "input.zip")
+        extract_dir = os.path.join(temp_dir, "extracted")
+        output_zip_path = os.path.join(temp_dir, "converted.zip")
+        
+        os.makedirs(extract_dir, exist_ok=True)
+        
+        # Download the zip file
+        try:
+            zip_content = await file.read()
+            with open(input_zip_path, 'wb') as f:
+                f.write(zip_content)
+            logger.info(f"Downloaded file: {file.filename}, size: {file.size} bytes")
+            await interaction.followup.send(f"Processing file: {file.filename}", ephemeral=True)
+        except Exception as e:
+            logger.error(f"Error downloading the file: {str(e)}")
+            return await interaction.followup.send(f"Error downloading the file: {str(e)}")
+        
+        # Extract the zip file
+        try:
+            with zipfile.ZipFile(input_zip_path, 'r') as zip_ref:
+                zip_ref.extractall(extract_dir)
+        except Exception as e:
+            return await interaction.followup.send(f"Error extracting the zip file: {str(e)}")
+        
+        # Look for files matching the pattern in the extracted directory
+        rr_files_exist = False
+        for root, _, files in os.walk(extract_dir):
+            for file in files:
+                if "RR" in file:
+                    rr_files_exist = True
+                    break
+            if rr_files_exist:
+                break
+        
+        if not rr_files_exist:
+            return await interaction.followup.send("No matching files found in the zip. Looking for files containing 'RR' in the name.")
+        
+        # Find the actual directory containing the files
+        # This handles the case where zip contains a folder containing the files
+        original_dir = os.getcwd()
+        target_dir = extract_dir
+        
+        # Check if there's a single directory in the extracted content
+        contents = os.listdir(extract_dir)
+        if len(contents) == 1 and os.path.isdir(os.path.join(extract_dir, contents[0])):
+            target_dir = os.path.join(extract_dir, contents[0])
+            await interaction.followup.send(f"Found nested folder: {contents[0]}", ephemeral=True)
+        
+        try:
+            # Copy the script to the target directory
+            script_path = os.path.join(original_dir, "360toPC.py")
+            target_script_path = os.path.join(target_dir, "360toPC.py")
+            shutil.copy2(script_path, target_script_path)
+            
+            # Change to the target directory and run the script
+            os.chdir(target_dir)
+            
+            # List files before conversion
+            files_before = os.listdir(target_dir)
+            matching_files = [f for f in files_before if "RR" in f]
+            
+            if not matching_files:
+                os.chdir(original_dir)
+                return await interaction.followup.send(f"No matching *RR* files found in the directory. Found these files instead: {', '.join(files_before[:10])}")
+                
+            # Run the conversion script
+            await interaction.followup.send(f"Found {len(matching_files)} files to convert. Processing...", ephemeral=True)
+            
+            process = await asyncio.create_subprocess_exec(
+                "python3", target_script_path, "*RR*", "*RR*",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0:
+                os.chdir(original_dir)
+                return await interaction.followup.send(f"Error running the conversion script: {stderr.decode()}")
+                
+            # Change back to original directory
+            os.chdir(original_dir)
+            
+            # Check if the converted_files directory was created
+            # It will be in the target directory, not necessarily directly in extract_dir
+            converted_dir = os.path.join(target_dir, "converted_files")
+            if not os.path.exists(converted_dir) or not os.listdir(converted_dir):
+                return await interaction.followup.send("Conversion process didn't produce any files. Please check if the uploaded files match the expected format.")
+            
+            # Create a new zip file with the converted files
+            with zipfile.ZipFile(output_zip_path, 'w', zipfile.ZIP_DEFLATED) as zip_out:
+                for root, _, files in os.walk(converted_dir):
+                    for file_name in files:
+                        file_path = os.path.join(root, file_name)
+                        arcname = os.path.relpath(file_path, converted_dir)
+                        zip_out.write(file_path, arcname)
+            
+            # Count converted files
+            converted_file_count = sum(len(files) for _, _, files in os.walk(converted_dir))
+            
+            # Send the zip file back to the user
+            with open(output_zip_path, 'rb') as f:
+                output_file = discord.File(fp=io.BytesIO(f.read()), filename=f"converted_{original_filename}")
+                await interaction.followup.send(
+                    content=f"✅ Files converted successfully! Converted {converted_file_count} files. Here's your converted zip file:",
+                    file=output_file
+                )
+                
+            logger.info(f"Successfully converted {converted_file_count} files for {interaction.user.name}")
+                
+        except Exception as e:
+            if os.getcwd() != original_dir:
+                os.chdir(original_dir)
+            await interaction.followup.send(f"An error occurred during conversion: {str(e)}")
 
 
 @bot.tree.command(name="breeze_video", description="Posts a Breeze video link")
@@ -2220,30 +2687,9 @@ async def meta(interaction: discord.Interaction, ehr_file: discord.Attachment):
         await interaction.response.send_message(f"An error occurred: {str(e)}", ephemeral=True)
 
 # Admin-Befehl zum Starten der Bewertung in einem Kanal
-@bot.event
-async def on_ready():
-    print(f"Bot {bot.user} is online.")
-    
-    # Setze den Status des Bots auf "Playing Disney Infinity"
-    await bot.change_presence(activity=discord.Game(name="Community Toyboxes"))
 
-    # Lade die gespeicherten Bewertungen, wenn der Bot startet
-    load_ratings()
 
-    # Registriere Views für alle Nachrichten, die Bewertungen haben
-    for message_id in message_ratings.keys():
-        bot.add_view(RatingView(message_id))
 
-    # Befehle synchronisieren, um sicherzustellen, dass Slash-Befehle registriert sind
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)")
-
-        # Registriert die Persistente View
-        bot.add_view(PlayView())
-        print("Persistent views registered successfully.")
-    except Exception as e:
-        print(f"Error syncing commands: {e}")
 
 # Slash-Befehl registrieren, um die Bewertung in einem Kanal zu starten
 @bot.tree.command(name="rate", description="Create a Toybox rating with stars.")
@@ -2369,6 +2815,7 @@ class PlayView(discord.ui.View):
         discord.app_commands.Choice(name="Allnightgaming", value="allnightgaming"),
         discord.app_commands.Choice(name="ThatBrownBat", value="thatbrownbat"),
         discord.app_commands.Choice(name="72Pringle", value="72pringle"),
+        discord.app_commands.Choice(name="Misc", value="misc"),
         discord.app_commands.Choice(name="JK", value="jk")
     ]
 )
@@ -2512,6 +2959,7 @@ async def batch_infos(interaction: discord.Interaction, creator: str):
         discord.app_commands.Choice(name="Allnightgaming", value="allnightgaming"),
         discord.app_commands.Choice(name="ThatBrownBat", value="thatbrownbat"),
         discord.app_commands.Choice(name="72Pringle", value="72pringle"),
+        discord.app_commands.Choice(name="Misc", value="misc"),
         discord.app_commands.Choice(name="JK", value="jk")
     ]
 )
@@ -2755,20 +3203,6 @@ async def blacklist_top_threads(interaction: discord.Interaction, thread_id: str
         await interaction.response.send_message(f"❌ Added thread `{thread_id}` to blacklist.", ephemeral=True)
 
 
-
-@bot.tree.command(
-    name="update_toyboxes", 
-    description="Update the Toybox database threads with tags"
-)
-
-async def update_toyboxes(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    success = await update_toybox_database(interaction.guild)
-    if success:
-        await interaction.followup.send("✅ Toybox database has been updated!", ephemeral=True)
-    else:
-        await interaction.followup.send("❌ Error updating toybox database", ephemeral=True)
-
 @bot.tree.command(
     name="set_tag",
     description="Set a tag for this thread (use in destination thread)"
@@ -2977,122 +3411,357 @@ async def analyze_toyboxes(interaction: discord.Interaction, file: discord.Attac
 
 
 @bot.event
-async def on_message(message):
-    await bot.process_commands(message)
-    
+async def on_message(message: discord.Message): # discord.Message Typ-Hinweis hinzugefügt
     if message.author.bot:
         return
 
-    if message.author.id not in counter.counting_sessions:
-        return
-    
-    processed_files = []
-    
-    for attachment in message.attachments:
-        if attachment.filename.endswith('.zip'):
-            zip_data = await attachment.read()
-            count = counter.count_srr_files(zip_data, attachment.filename)
+    # --- ZUERST: AI Toybox Chat Handler ---
+    # Prüfen, ob die Nachricht in einem vom Bot erstellten privaten Thread für den AI-Chat ist
+    is_ai_chat_thread = (
+        isinstance(message.channel, discord.Thread) and
+        hasattr(message.channel, 'owner') and message.channel.owner == bot.user and # Wichtig: Thread gehört dem Bot
+        message.channel.type == discord.ChannelType.private_thread and
+        message.channel.name.startswith("Toybox Chat with")
+    )
+
+    if is_ai_chat_thread:
+        # --- AI Chat Thread Logic (kopiert von unten in V66.py) ---
+        original_query = message.content.strip()
+        if not original_query or original_query.startswith(('/', '!', '$', '#')):
+            return # Ignoriere Befehle oder leere Nachrichten im AI-Chat
+
+        if not gemini_model:
+            await message.channel.send("❌ Waaak! My thinking cap isn't working right now (AI features disabled). Please contact an admin.")
+            return
+
+        async with message.channel.typing():
+            try:
+                # --- Query Expansion Logic ---
+                KB_MATCH_THRESHOLD = 85
+                expanded_query = original_query
+                query_lower = original_query.lower()
+                best_match = None
+                all_kb_terms_map = {}
+                if hasattr(bot, "knowledge_base") and bot.knowledge_base:
+                    for item in bot.knowledge_base:
+                        concept_lower = item.get('concept', '').lower()
+                        aliases_lower = [a.lower() for a in item.get('aliases', [])]
+                        terms_for_item = [term for term in ([concept_lower] + aliases_lower) if term]
+                        for term in terms_for_item:
+                            if term not in all_kb_terms_map:
+                                all_kb_terms_map[term] = item
+                best_overall_score = 0
+                best_matching_item = None
+                best_matched_term_debug = ""
+                if all_kb_terms_map:
+                    best_extract_match = process.extractOne(
+                        query_lower,
+                        all_kb_terms_map.keys(),
+                        scorer=fuzz.WRatio,
+                        score_cutoff=80
+                    )
+                    if best_extract_match:
+                        matched_term, score = best_extract_match
+                        best_matching_item = all_kb_terms_map.get(matched_term)
+                        best_overall_score = score
+                        best_matched_term_debug = matched_term
+                triggered_expansion = False
+                expansion_keywords = set()
+                if best_overall_score >= KB_MATCH_THRESHOLD and best_matching_item:
+                    triggered_expansion = True
+                    keywords = best_matching_item.get('keywords', [])
+                    expansion_keywords.update(k.lower() for k in keywords if k)
+                    keyword_string = " ".join(expansion_keywords)
+                    temp_query_parts = [best_matched_term_debug]
+                    if keyword_string: temp_query_parts.append(keyword_string)
+                    final_parts = []
+                    seen_words = set()
+                    for part in " ".join(temp_query_parts).split():
+                        cleaned_part = part.strip()
+                        if cleaned_part and cleaned_part not in seen_words:
+                            final_parts.append(cleaned_part)
+                            seen_words.add(cleaned_part)
+                    expanded_query = " ".join(final_parts)
+                    print(f"🔎 Query Expansion Triggered (extractOne):")
+                    print(f"   Original Query: '{original_query}'")
+                    print(f"   Best Match Term in KB: '{best_matched_term_debug}' (from Concept: '{best_matching_item.get('concept', 'N/A')}') with score {best_overall_score}")
+                    print(f"   -> Added Keywords: {expansion_keywords}")
+                    print(f"   ==> Expanded Query for Search: '{expanded_query}'")
+                else:
+                    print(f"ℹ️ Query Expansion: No single strong match found (Best score: {best_overall_score} < {KB_MATCH_THRESHOLD}). Using original query '{original_query}' for search.")
+                    expanded_query = original_query
+
+                # 1. Access Toybox Data
+                all_toyboxes = getattr(bot, "toybox_data", [])
+                if not all_toyboxes:
+                    await message.channel.send("❌ Waaak! Can't access notes. Contact admin.")
+                    return
+
+                # 2. Retrieve Relevant Toyboxes using Fuzzy Search
+                keywords_for_retrieval = expansion_keywords if triggered_expansion else set()
+                initially_retrieved_toyboxes = find_relevant_toyboxes( # Stellen Sie sicher, dass diese Funktion in V66.py korrekt definiert ist
+                    expanded_query,
+                    all_toyboxes,
+                    keywords_for_retrieval,
+                    max_results=15
+                )
+
+                if not initially_retrieved_toyboxes:
+                    no_results_embed = discord.Embed(
+                        title="🤔 Hmm, Quackers!",
+                        description=(
+                            f"Waaak! Even with my extra knowledge (if applicable), I couldn't find Toyboxes matching \"{original_query}\" in the collection. 🦆\n\n"
+                            f"**Maybe try asking differently?**\n"
+                            f"• Use different keywords (e.g., 'race track' instead of 'fast cars')\n"
+                            f"• Mention a character (like 'Iron Man' or 'Mickey')\n"
+                            f"• Specify a franchise (Star Wars, Marvel, Disney)\n"
+                            f"• Describe gameplay (like 'combat arena', 'platformer')"
+                        ),
+                        color=discord.Color.orange()
+                    )
+                    no_results_embed.set_thumbnail(url="https://i.imgur.com/FxMKfGt.png") # Donald confused
+                    no_results_embed.set_footer(text="Keep trying! We'll find something fun!")
+                    await message.channel.send(embed=no_results_embed)
+                    return
+
+                context_str = "Found these potentially relevant Toyboxes in our forum archive:\n\n"
+                context_limit = 10000 # Gemini Context Limit (ca.)
+                temp_context = ""
+                actual_toyboxes_in_context = []
+                for i, tb in enumerate(initially_retrieved_toyboxes, 1):
+                    toybox_name = tb.get('name', 'N/A').strip()
+                    toybox_desc = tb.get('description', '').strip() # Beschreibung für Kontext verwenden
+                    toybox_url = tb.get('url', '')
+                    toybox_tags = tb.get('tags', ['Other']) # Standard-Tag, falls keine vorhanden
+
+                    # Kurze Vorschau der Beschreibung
+                    if toybox_desc:
+                        desc_preview = ' '.join(toybox_desc.splitlines()) # Mehrzeilige Beschreibungen in eine Zeile
+                        desc_preview = desc_preview[:200] + ('...' if len(desc_preview) > 200 else '')
+                    else:
+                        desc_preview = "No description provided."
+
+                    entry_str = f"--- Toybox {i} ---\nName: {toybox_name}\nTags: {', '.join(toybox_tags)}\nDesc Preview: {desc_preview}\nLink: <{toybox_url}>\n\n"
+
+                    if len(context_str) + len(temp_context) + len(entry_str) > context_limit:
+                        print(f"Context limit ({context_limit}) reached. Stopping context inclusion at Toybox {i-1}.")
+                        break
+                    temp_context += entry_str
+                    actual_toyboxes_in_context.append(tb)
+                context_str += temp_context
+                context_str += "---\nEnd of Provided Toybox Information."
+
+                if not actual_toyboxes_in_context: # Sollte nicht passieren, wenn initially_retrieved_toyboxes nicht leer ist, aber sicher ist sicher
+                    await message.channel.send("Waaak! The first found toybox info was too long to process. Try a more specific query? 🦆")
+                    return
+
+                prompt = f"""You are a specialized assistant for the Disney Infinity community Discord server. Your goal is to help users find Toyboxes shared in our forum based on their questions.
+You MUST base your answer **exclusively** on the "Provided Toybox Information" below. **Do not** use external knowledge, make up information, hallucinate details, or refer to toyboxes not listed here.
+
+**Background:**
+- The user asked the original question: "{original_query}"
+- To help find relevant results, the search was potentially expanded using related keywords based on the identified concept: '{best_matching_item.get('concept', 'N/A') if best_matching_item else 'None Identified'}'.
+- The "Provided Toybox Information" below contains the results found using this potentially expanded search. These results might include Toyboxes very specific to the query, or Toyboxes related through shared characters or themes.
+
+**Instructions:**
+1. Identify the core **subject or topic** the user is asking about in their original question: "{original_query}". The central theme is related to '{best_matching_item.get('concept', 'User Query') if best_matching_item else original_query}'. Let's call this the 'User Topic'.
+2. Carefully examine **each** item in the "Provided Toybox Information".
+3. For each Toybox, determine if it is **genuinely relevant** to the 'User Topic' (especially the concept '{best_matching_item.get('concept', 'User Query') if best_matching_item else original_query}').
+    - **High Relevance:** The Toybox name, tags, or description *directly* relates to the 'User Topic' or its associated concept (e.g., contains "Endor", "Ewoks", "Return of the Jedi", "Rebellion", "Death Star II" when the topic is Episode 6; contains "Racing" when the topic is racing).
+    - **Consider Relevance:** Even if the Toybox title doesn't exactly match the original query phrase, it is relevant if its content (judging by name, tags like "Star Wars", description preview) clearly relates to the 'User Topic'.
+    - **Ignore if irrelevant:** Disregard Toyboxen that seem completely unrelated to the 'User Topic', even if they appeared in the search results.
+4. Formulate a helpful and conversational response based **only** on the relevant Toyboxen you identified:
+    - **If relevant Toyboxen were found:**
+        - Start with a positive confirmation based on the 'User Topic'. Examples: "Okay, I found some Toyboxes related to Episode 5!", "Sure, here are some Toyboxes featuring Han Solo:", "Alright, check out these Toyboxes related to Dagobah:". Adapt the intro to the 'User Topic' you identified.
+        - Recommend **only** the Toyboxen you deemed relevant in step 3, up to a maximum of 10.
+        - For each recommended Toybox:
+            - Use the Toybox Name as a **Markdown H2 heading** (e.g., `## Invasion of Dagobah`).
+            - On the **next line**, briefly explain *why it's relevant* to the 'User Topic' or the identified concept ('{best_matching_item.get('concept', 'User Query') if best_matching_item else original_query}'), citing specific details from the context (e.g., "This one is set on Endor, the location of the final battle in Episode 6." or "Features the Rebellion, a key faction in Episode 6.").
+            - Immediately following, include the **Link** as a **Markdown bullet point**: `* [🔗 Link](<URL>)`
+    - **If, after careful review, none of the PROVIDED Toyboxen seem relevant to the 'User Topic':**
+        - State clearly that none of the specific options **I examined from the search results** seemed to fit the 'User Topic' ({original_query}). <-- Nutze hier die Originalanfrage als Referenz.
+        - Briefly explain *why* based on the topic (e.g., "The results mostly contained general Star Wars levels or items from other Episodes...").
+        - Encourage them to try different terms.
+    - **Strictly adhere to the provided information.** Do not add closing remarks.
+
+**Provided Toybox Information (Context - Use ONLY This):**
+{context_str}
+
+**User's Original Question:**
+{original_query}
+
+**Your Answer (Respond conversationally following all instructions, focusing *only* on relevant items from the provided context):**
+"""
+                try:
+                    response = await asyncio.to_thread(
+                        gemini_model.generate_content,
+                        prompt,
+                        generation_config=genai.types.GenerationConfig(temperature=0.4),
+                        safety_settings=[
+                            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"}
+                        ]
+                    )
+                    if not response.parts:
+                        block_reason = "Unknown"
+                        safety_ratings_str = "N/A"
+                        if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+                            block_reason = response.prompt_feedback.block_reason or "Not specified"
+                            safety_ratings_str = str(response.prompt_feedback.safety_ratings) if response.prompt_feedback.safety_ratings else "N/A"
+                        print(f"Gemini response potentially blocked or empty (Thread {message.channel.id}). Reason: {block_reason}, Safety: {safety_ratings_str}")
+                        await message.channel.send(f"⚠️ Waaak! My response got filtered (Reason: `{block_reason}`). Ask differently? 🦆")
+                        return
+                    answer = response.text
+                except Exception as gemini_err:
+                    print(f"❌ Gemini API Error (Thread {message.channel.id}): {gemini_err}\n{traceback.format_exc()}")
+                    error_msg = f"🤖 Waaak! Brain snag ({type(gemini_err).__name__}). Try again? 🦆"
+                    await message.channel.send(error_msg)
+                    return
+
+                # Send formatted response
+                try:
+                    response_embed = discord.Embed(
+                        title="🦆 Toybox Recommendations:",
+                        description=answer[:4096] if len(answer) <= 4096 else answer[:4093] + "...",
+                        color=discord.Color.random()
+                    )
+                    await message.channel.send(embed=response_embed)
+                    if len(answer) > 4096:
+                        remaining_text = "[...]\n" + answer[4096:]
+                        MAX_MSG_LENGTH = 2000
+                        remaining_chunks = [remaining_text[i:i+MAX_MSG_LENGTH] for i in range(0, len(remaining_text), MAX_MSG_LENGTH)]
+                        for chunk in remaining_chunks:
+                            await message.channel.send(chunk)
+                            await asyncio.sleep(0.6)
+                except Exception as e:
+                    print(f"Unexpected error in send_formatted_response: {e}\n{traceback.format_exc()}")
+                    # Fallback to sending plain text if embed fails
+                    await message.channel.send(f"Aw, phooey! Something went wrong displaying the results.\n\nHere's what I found:\n{answer}")
+
+            except Exception as e:
+                print(f"❌ Unexpected Error during RAG processing in thread {message.channel.id}:")
+                print(traceback.format_exc())
+                await message.channel.send(f"🦆 Waaak! Unexpected error ({type(e).__name__}). Logged. Try again or tell admin!")
+        return # Wichtig: Beende die Funktion hier, da die AI-Chat-Nachricht behandelt wurde
+
+    # --- DANN: count_publish Logik ---
+    # Dieser Code wird nur ausgeführt, wenn es KEINE AI-Chat-Nachricht war
+    if message.author.id in counter.counting_sessions: # Nur wenn der Autor in einer Zählsitzung ist
+        processed_files = []
+        for attachment in message.attachments:
+            if attachment.filename.endswith('.zip'):
+                zip_data = await attachment.read()
+                count = counter.count_srr_files(zip_data, attachment.filename)
+                
+                counter.counting_sessions.setdefault(message.author.id, []).append((attachment.filename, count))
+                processed_files.append((attachment.filename, count))
+        
+        if processed_files: # Nur wenn ZIPs verarbeitet wurden
+            total = sum(count for _, count in counter.counting_sessions[message.author.id])
             
-            counter.counting_sessions.setdefault(message.author.id, []).append((attachment.filename, count))
-            processed_files.append((attachment.filename, count))
-    
-    if processed_files:
-        total = sum(count for _, count in counter.counting_sessions[message.author.id])
-        
-        # Updated progress embed with new design
-        progress_embed = discord.Embed(
-            title="📊 Toybox Counting Session",
-            description="Upload ZIP files to count toyboxes.\nCurrent progress shown below.",
-            color=0xdb6534
-        )
-        
-        # Add divider before file details
-        progress_embed.add_field(
-            name="━━ File Details ━━",
-            value="",
-            inline=False
-        )
-        
-        # Add file details with new formatting
-        for fname, fcount in counter.counting_sessions[message.author.id]:
-            formatted_filename = fname.replace('_', ' ').replace('.zip', '')
+            progress_embed = discord.Embed(
+                title="📊 Toybox Counting Session",
+                description="Upload ZIP files to count toyboxes.\nCurrent progress shown below.",
+                color=0xdb6534 # Orange
+            )
+            progress_embed.add_field(name="━━ File Details ━━", value="", inline=False)
+            for fname, fcount in counter.counting_sessions[message.author.id]:
+                formatted_filename = fname.replace('_', ' ').replace('.zip', '')
+                progress_embed.add_field(
+                    name=f"📦 {formatted_filename}",
+                    value=f"> Found `{fcount}` Toybox{'es' if fcount != 1 else ''}",
+                    inline=False
+                )
+            progress_embed.add_field(name="━━ Summary ━━", value="", inline=False)
             progress_embed.add_field(
-                name=f"📦 {formatted_filename}",
-                value=f"> Found `{fcount}` Toybox{'es' if fcount != 1 else ''}",
+                name="📈 Current Total",
+                value=f"```\n{total} Toybox{'es' if total != 1 else ''}\n```",
                 inline=False
             )
-        
-        # Add divider before total
-        progress_embed.add_field(
-            name="━━ Summary ━━",
-            value="",
-            inline=False
-        )
-        
-        # Add total with code block formatting
-        progress_embed.add_field(
-            name="📈 Current Total",
-            value=f"```\n{total} Toybox{'es' if total != 1 else ''}\n```",
-            inline=False
-        )
-        
-        # Add timestamp
-        progress_embed.timestamp = discord.utils.utcnow()
-        
-        # Add enhanced footer
-        progress_embed.set_footer(
-            text="Toybox Count Bot | Session in Progress 🔄",
-            icon_url="https://cdn.discordapp.com/emojis/1039238467898613851.webp?size=96&quality=lossless"
-        )
-        
-        # Update the progress message
-        progress_message = counter.progress_messages.get(message.author.id)
-        if progress_message:
-            await progress_message.edit(embed=progress_embed, view=CountingView(counter, message.author.id, progress_message))
-        
-        # Delete only if all attachments were ZIP files
-        if len(processed_files) == len(message.attachments):
-            try:
-                await message.delete()
-            except:
-                pass
+            progress_embed.timestamp = discord.utils.utcnow()
+            progress_embed.set_footer(
+                text="Toybox Count Bot | Session in Progress 🔄",
+                icon_url="https://cdn.discordapp.com/emojis/1039238467898613851.webp?size=96&quality=lossless" # Beispiel-Emoji
+            )
+            
+            progress_message_obj = counter.progress_messages.get(message.author.id) # progress_message ist jetzt progress_message_obj
+            if progress_message_obj:
+                await progress_message_obj.edit(embed=progress_embed, view=CountingView(counter, message.author.id, progress_message_obj))
+            
+            if len(processed_files) == len(message.attachments): # Nur löschen, wenn alle Anhänge ZIPs waren
+                try:
+                    await message.delete()
+                except discord.HTTPException: # Kann fehlschlagen, wenn Berechtigungen fehlen oder Nachricht schon weg ist
+                    pass
+        # Wenn keine ZIPs verarbeitet wurden, aber der User in einer Session ist, passiert nichts weiter mit der Zähl-Logik für diese Nachricht.
 
+    # --- ZULETZT: Prefixed Commands verarbeiten ---
+    # Dieser Code wird nur ausgeführt, wenn es keine AI-Chat-Nachricht war
+    # und entweder der User nicht in einer Zählsitzung ist ODER die Nachricht in der Zählsitzung keine ZIPs enthielt.
+    await bot.process_commands(message)
 
 
 # 🚀 Update ausführen, wenn der Bot startet
 @bot.event
 async def on_ready():
+    print(f"Bot {bot.user} is online.")
 
-    # Add the persistent views
-    bot.add_view(ToyboxView())
-    await setup_views()
-
-    # Add any existing views here
-    bot.add_view(PersistentView(timeout=None))
-    print(f'Bot is ready! Logged in as {bot.user.name}')
-    
-    
-    # Setze den Status des Bots auf "Playing Disney Infinity"
+    # Set presence
     await bot.change_presence(activity=discord.Game(name="Community Toyboxes"))
 
-    # Lade die gespeicherten Bewertungen, wenn der Bot startet
+    # Load ratings
     load_ratings()
 
-    # Registriere Views für alle Nachrichten, die Bewertungen haben
+    # Register persistent views
+    bot.add_view(ToyboxView())
+    await setup_views()
+    bot.add_view(PersistentView(timeout=None))
+    bot.add_view(AskToyboxPanelView())
+    bot.add_view(PlayView())
+
+    # Register RatingView for all messages with ratings
     for message_id in message_ratings.keys():
         bot.add_view(RatingView(message_id))
 
-    # Befehle synchronisieren, um sicherzustellen, dass Slash-Befehle registriert sind
+    # Load knowledge base
+    try:
+        async with aiofiles.open(knowledge_base_file, "r", encoding='utf-8') as f:
+            content = await f.read()
+            bot.knowledge_base = json.loads(content)
+        print(f"✅ Knowledge Base loaded successfully with {len(bot.knowledge_base)} concepts from {knowledge_base_file}.")
+    except FileNotFoundError:
+        print(f"⚠️ Knowledge Base file '{knowledge_base_file}' not found. Query expansion will be disabled.")
+        bot.knowledge_base = []
+    except Exception as e:
+        print(f"❌ Unexpected error loading Knowledge Base '{knowledge_base_file}': {e}")
+        bot.knowledge_base = []
+
+    # Load toybox data
+    try:
+        with open(toybox_data_file, "r", encoding='utf-8') as f:
+            bot.toybox_data = json.load(f)
+        print(f"✅ Toybox database loaded with {len(bot.toybox_data)} entries.")
+    except Exception as e:
+        print(f"⚠️ Could not load toybox database: {e}")
+        bot.toybox_data = []
+
+    # Sync commands and register views
     try:
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} command(s)")
-
-        # Registriert die Persistente View
-        bot.add_view(PlayView())
         print("Persistent views registered successfully.")
     except Exception as e:
         print(f"Error syncing commands: {e}")
-    await update_toybox_database()
+
+    # Update toybox database (pass guild if needed)
+    if bot.guilds:
+        await update_toybox_database(bot.guilds[0])
+    else:
+        print("No guilds found for update_toybox_database!")
+
+    print(f'Bot is ready! Logged in as {bot.user.name}')
 
 
 # Bot starten
