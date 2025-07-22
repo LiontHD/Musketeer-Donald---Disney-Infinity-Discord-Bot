@@ -26,6 +26,7 @@ from typing import Optional
 import requests
 import asyncio 
 import subprocess
+from typing import Union
 import logging
 import google.generativeai as genai
 from thefuzz import fuzz, process
@@ -41,6 +42,7 @@ AIRTABLE_BASE_ID = os.getenv('AIRTABLE_BASE_ID')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 knowledge_base_file = "knowledge_base.json"
 toybox_data_file = "toybox_data.json"
+TARGET_PURGE_CHANNEL_ID = 1361838497740095558
 
 gemini_model = None
 if GEMINI_API_KEY:
@@ -1212,29 +1214,126 @@ async def download_file(url: str) -> io.BytesIO:
 @app_commands.checks.has_permissions(administrator=True)
 async def create_ask_panel(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="🎮 Disney Infinity Toybox Finder",
+        title="🦆 Disney Infinity Toybox AI-Chat",
         description=(
-            "### Hey there, I'm **Donald Duck**! 🦆\n\n"
-            "I can help you discover the perfect Toybox from our community collection.\n"
-            "Whether you're looking for Marvel heroes, Star Wars adventures, or Disney magic, "
-            "I've got you covered!\n\n"
-            "**Click the button below to start a private chat with me!**"
+            "### Hey there, I'm Donald Duck! 🦆\n"
+            "I can help you discover the perfect Toybox from our community collection!\n"
+            "\n**🔍 What can I help you find?** \n"
+            "Disney, Marvel, Star Wars, Character based or other toyboxes! \n"
         ),
         color=discord.Color.from_rgb(59, 136, 195)
     )
-    embed.set_thumbnail(url="https://i.imgur.com/yfgwrcN.png")
-    embed.add_field(
-        name="🔍 What can I help you find?",
-        value="• Star Wars adventures\n• Marvel combat arenas\n• Disney character worlds\n• Racing or platformer games",
-        inline=False
-    )
-    embed.set_footer(text="Powered by Toybox AI Assistant", icon_url="https://i.imgur.com/L1Yk5rV.png")
     view = AskToyboxPanelView()
     await interaction.response.send_message(embed=embed, view=view)
 
+@bot.tree.command(name="clean_threads", description=f"ADMIN: Deletes all threads in the musketeer-donald channel (ID: {TARGET_PURGE_CHANNEL_ID}).")
+@app_commands.checks.has_permissions(administrator=True)
+async def purge_target_channel_threads(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
 
+    if not interaction.guild:
+        await interaction.followup.send("This command can only be used in a server.", ephemeral=True)
+        return
 
+    target_channel = interaction.guild.get_channel(TARGET_PURGE_CHANNEL_ID)
 
+    if not target_channel:
+        await interaction.followup.send(
+            f"Error: The predefined target channel (ID: {TARGET_PURGE_CHANNEL_ID}) was not found in this server.",
+            ephemeral=True
+        )
+        return
+
+    if not isinstance(target_channel, (discord.TextChannel, discord.ForumChannel)):
+        await interaction.followup.send(
+            f"Error: The predefined target channel (ID: {TARGET_PURGE_CHANNEL_ID}) is not a text or forum channel.",
+            ephemeral=True
+        )
+        return
+
+    # Check if the bot has guild-level manage_threads permission
+    if not interaction.guild.me.guild_permissions.manage_threads:
+        await interaction.followup.send(
+            "Error: I don't have the 'Manage Threads' permission at the server level to perform this action.",
+            ephemeral=True
+        )
+        return
+    
+    # Check bot's permissions in the specific channel
+    bot_channel_permissions = target_channel.permissions_for(interaction.guild.me)
+    if not bot_channel_permissions.manage_threads:
+        await interaction.followup.send(
+            f"Error: I don't have the 'Manage Threads' permission in the channel {target_channel.mention} to perform this action.",
+            ephemeral=True
+        )
+        return
+
+    all_threads_map = {}
+
+    # Active threads
+    try:
+        for thread_obj in target_channel.threads:
+            all_threads_map[thread_obj.id] = thread_obj
+    except discord.Forbidden:
+        await interaction.followup.send(f"Error: I don't have permission to list active threads in {target_channel.mention}.", ephemeral=True)
+        return
+    except Exception as e:
+        await interaction.followup.send(f"An unexpected error occurred while listing active threads: {e}", ephemeral=True)
+        return
+
+    # Archived threads
+    try:
+        async for thread_obj in target_channel.archived_threads(limit=None):
+            all_threads_map[thread_obj.id] = thread_obj
+    except discord.Forbidden:
+        print(f"Permission error: Could not fetch general archived threads for {target_channel.name} ({target_channel.id}).")
+    except Exception as e:
+        print(f"Error fetching general archived threads for {target_channel.name} ({target_channel.id}): {e}")
+
+    if isinstance(target_channel, discord.TextChannel):
+        try:
+            async for thread_obj in target_channel.archived_threads(private=True, limit=None):
+                 all_threads_map[thread_obj.id] = thread_obj
+        except discord.Forbidden:
+            print(f"Permission error: Could not fetch private archived threads for TextChannel {target_channel.name} ({target_channel.id}).")
+        except Exception as e:
+            print(f"Error fetching private archived threads for TextChannel {target_channel.name} ({target_channel.id}): {e}")
+
+    all_threads_list = list(all_threads_map.values())
+
+    if not all_threads_list:
+        await interaction.followup.send(f"No threads found in {target_channel.mention} that I can see or manage.", ephemeral=True)
+        return
+
+    deleted_count = 0
+    failed_count = 0
+    
+    await interaction.edit_original_response(content=f"Found {len(all_threads_list)} threads in {target_channel.mention}. Starting deletion process... This may take a while.")
+
+    for thread_obj_to_delete in all_threads_list:
+        try:
+            await thread_obj_to_delete.delete()
+            deleted_count += 1
+            await asyncio.sleep(0.5) 
+        except discord.Forbidden:
+            failed_count += 1
+            print(f"Permission error: Could not delete thread '{thread_obj_to_delete.name}' ({thread_obj_to_delete.id}).")
+        except discord.HTTPException as e:
+            failed_count += 1
+            print(f"HTTP error: Failed to delete thread '{thread_obj_to_delete.name}' ({thread_obj_to_delete.id}): {e.status} - {e.text}")
+        except Exception as e:
+            failed_count +=1
+            print(f"Generic error: Failed to delete thread '{thread_obj_to_delete.name}' ({thread_obj_to_delete.id}): {type(e).__name__} - {e}")
+
+    result_message = f"Operation complete for {target_channel.mention}:\n"
+    result_message += f"Successfully deleted: {deleted_count} threads.\n"
+    if failed_count > 0:
+        result_message += f"Failed to delete: {failed_count} threads. Check console logs for details."
+    
+    if len(result_message) > 2000:
+        result_message = result_message[:1990] + "... (truncated)"
+        
+    await interaction.edit_original_response(content=result_message)
 
 
 @bot.tree.command(name="update_toyboxes", description="ADMIN: Manually update the toybox search database.")
