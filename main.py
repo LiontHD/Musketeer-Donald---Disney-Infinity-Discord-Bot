@@ -43,6 +43,8 @@ GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 knowledge_base_file = "knowledge_base.json"
 toybox_data_file = "toybox_data.json"
 TARGET_PURGE_CHANNEL_ID = 1361838497740095558
+BLACKLIST_FILE = "blacklisted_threads.json"
+
 
 gemini_model = None
 if GEMINI_API_KEY:
@@ -1124,16 +1126,47 @@ class SimpleTagAnalyzer:
             
         return tags
 
-class Bot(commands.Bot):
+class MyBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
         super().__init__(command_prefix="/", intents=intents)
-        
-    async def setup_hook(self):
-        print("Bot is setting up...")
 
-bot = Bot()
+    async def setup_hook(self):
+        # HIER KOMMT DIE GANZE START-LOGIK HIN
+
+        # 1. Lade alle Cogs aus dem 'cogs'-Ordner
+        print("--- Loading Cogs ---")
+        for filename in os.listdir('./cogs'):
+            if filename.endswith('.py'):
+                try:
+                    await self.load_extension(f'cogs.{filename[:-3]}')
+                    print(f"✅ Loaded Cog: {filename}")
+                except Exception as e:
+                    print(f"❌ Failed to load cog {filename}:")
+                    traceback.print_exc()
+        
+        # 2. Registriere persistente Views (falls noch nicht in der Cog selbst)
+        self.add_view(AskToyboxPanelView()) # Beispiel
+        
+        # 3. Synchronisiere die Befehle mit Discord
+        try:
+            synced = await self.tree.sync()
+            print(f"--- Synced {len(synced)} command(s) ---")
+        except Exception as e:
+            print(f"Error syncing commands: {e}")
+
+    async def on_ready(self):
+        # DIESE FUNKTION IST JETZT VIEL AUFGERÄUMTER
+        print(f'Bot is ready! Logged in as {self.user.name}')
+        await self.change_presence(activity=discord.Game(name="Community Toyboxes"))
+        
+        # Das Laden von Daten wie Ratings ist hier ok, da es schnell geht
+        load_ratings()
+
+
+# Instanz der neuen Klasse erstellen
+bot = MyBot()
 
 async def update_toybox_database(guild: discord.Guild):
     forum_channel = guild.get_channel(forum_channel_id)
@@ -2176,6 +2209,35 @@ async def breeze_video(interaction: discord.Interaction, video_type: app_command
     embed.set_footer(text="Click the title to watch the video")
     
     await interaction.response.send_message(embed=embed)
+
+
+
+
+
+@bot.tree.command(name="playstation_links", description="Zeigt Download-Links für PlayStation Savefiles an.")
+async def playstation_links(interaction: discord.Interaction):
+    # Erstelle ein Embed für eine schönere und übersichtlichere Darstellung
+    embed = discord.Embed(
+        title="LiontHD PlayStation Savefiles",
+        description=(
+            "Hier sind die nützlichen Links für die PlayStation Savefiles von LiontHD:\n\n"
+            "**LiontHD (EU) - Savefile (0% Progress):**\n"
+            "[Hier klicken zum Herunterladen](https://drive.google.com/drive/folders/1bqeV_Bz_Ybsu3wMH4KsyqNqtFcM4n4Ta?usp=sharing)\n\n"
+            "**LiontHD (EU) - Savefile (100% Progress):**\n"
+            "[Hier klicken zum Herunterladen](https://drive.google.com/drive/folders/1vptZ4pkA9FqWE9tzcE4TQSHE2j2GwfGs?usp=sharing)\n\n"
+            "**LiontHD (EU) - Entschlüsseltes Savefile (savedata0 Ordner):**\n"
+            "[Hier klicken zum Herunterladen](https://drive.google.com/drive/folders/1GwH8zwBTx_37kaJsADPy2wqRG_U7famw?usp=sharing)"
+        ),
+        color=discord.Color.blue() # Ein passendes Blau für PlayStation
+    )
+    embed.set_footer(text="Diese Links sind für die EU-Version der PlayStation.")
+
+    # Sende das Embed als Antwort. 'ephemeral=True' sorgt dafür, dass die Nachricht nur für den Nutzer sichtbar ist, der den Befehl ausgeführt hat.
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+
+
 
 @bot.tree.command(
     name="count_publish",
@@ -3239,7 +3301,6 @@ async def play_init(interaction: discord.Interaction):
     view = PlayView()
     await interaction.response.send_message(embed=embed, view=view, ephemeral=False)  # Nachricht für alle sichtbar
 
-BLACKLIST_FILE = "blacklisted_threads.json"
 
 def load_blacklist():
     if os.path.exists(BLACKLIST_FILE):
@@ -3509,241 +3570,313 @@ async def analyze_toyboxes(interaction: discord.Interaction, file: discord.Attac
 
 
 
+# --- Event Listener for Messages (Handles AI Chat) ---
 @bot.event
-async def on_message(message: discord.Message): # discord.Message Typ-Hinweis hinzugefügt
-    if message.author.bot:
+async def on_message(message: discord.Message):
+    if message.author.bot: return
+    if not isinstance(message.channel, discord.Thread) or \
+       not hasattr(message.channel, 'owner') or message.channel.owner != bot.user or \
+       message.channel.type != discord.ChannelType.private_thread or \
+       not message.channel.name.startswith("Toybox Chat with"):
+        # await bot.process_commands(message) # Only if using prefix commands outside threads
         return
 
-    # --- ZUERST: AI Toybox Chat Handler ---
-    # Prüfen, ob die Nachricht in einem vom Bot erstellten privaten Thread für den AI-Chat ist
-    is_ai_chat_thread = (
-        isinstance(message.channel, discord.Thread) and
-        hasattr(message.channel, 'owner') and message.channel.owner == bot.user and # Wichtig: Thread gehört dem Bot
-        message.channel.type == discord.ChannelType.private_thread and
-        message.channel.name.startswith("Toybox Chat with")
-    )
+    # --- AI Chat Thread Logic ---
+    original_query = message.content.strip()
+    if not original_query or original_query.startswith(('/', '!', '$', '#')):
+        return
 
-    if is_ai_chat_thread:
-        # --- AI Chat Thread Logic (kopiert von unten in V66.py) ---
-        original_query = message.content.strip()
-        if not original_query or original_query.startswith(('/', '!', '$', '#')):
-            return # Ignoriere Befehle oder leere Nachrichten im AI-Chat
+    if not gemini_model:
+        await message.channel.send("❌ Waaak! My thinking cap isn't working right now (AI features disabled). Please contact an admin.")
+        return
 
-        if not gemini_model:
-            await message.channel.send("❌ Waaak! My thinking cap isn't working right now (AI features disabled). Please contact an admin.")
-            return
+    async with message.channel.typing():
+        try:
+            # ==================================================================
+            # --- NEU: Schritt 1 - Keyword-Extraktion mit Gemini ---
+            # ==================================================================
+            extracted_keywords_str = ""
+            search_query = original_query # Default to original if extraction fails
 
-        async with message.channel.typing():
             try:
-                # --- Query Expansion Logic ---
-                KB_MATCH_THRESHOLD = 85
-                expanded_query = original_query
-                query_lower = original_query.lower()
-                best_match = None
-                all_kb_terms_map = {}
-                if hasattr(bot, "knowledge_base") and bot.knowledge_base:
-                    for item in bot.knowledge_base:
-                        concept_lower = item.get('concept', '').lower()
-                        aliases_lower = [a.lower() for a in item.get('aliases', [])]
-                        terms_for_item = [term for term in ([concept_lower] + aliases_lower) if term]
-                        for term in terms_for_item:
-                            if term not in all_kb_terms_map:
-                                all_kb_terms_map[term] = item
-                best_overall_score = 0
-                best_matching_item = None
-                best_matched_term_debug = ""
-                if all_kb_terms_map:
-                    best_extract_match = process.extractOne(
-                        query_lower,
-                        all_kb_terms_map.keys(),
-                        scorer=fuzz.WRatio,
-                        score_cutoff=80
-                    )
-                    if best_extract_match:
-                        matched_term, score = best_extract_match
-                        best_matching_item = all_kb_terms_map.get(matched_term)
-                        best_overall_score = score
-                        best_matched_term_debug = matched_term
-                triggered_expansion = False
-                expansion_keywords = set()
-                if best_overall_score >= KB_MATCH_THRESHOLD and best_matching_item:
-                    triggered_expansion = True
-                    keywords = best_matching_item.get('keywords', [])
-                    expansion_keywords.update(k.lower() for k in keywords if k)
-                    keyword_string = " ".join(expansion_keywords)
-                    temp_query_parts = [best_matched_term_debug]
-                    if keyword_string: temp_query_parts.append(keyword_string)
-                    final_parts = []
-                    seen_words = set()
-                    for part in " ".join(temp_query_parts).split():
-                        cleaned_part = part.strip()
-                        if cleaned_part and cleaned_part not in seen_words:
-                            final_parts.append(cleaned_part)
-                            seen_words.add(cleaned_part)
-                    expanded_query = " ".join(final_parts)
-                    print(f"🔎 Query Expansion Triggered (extractOne):")
-                    print(f"   Original Query: '{original_query}'")
-                    print(f"   Best Match Term in KB: '{best_matched_term_debug}' (from Concept: '{best_matching_item.get('concept', 'N/A')}') with score {best_overall_score}")
-                    print(f"   -> Added Keywords: {expansion_keywords}")
-                    print(f"   ==> Expanded Query for Search: '{expanded_query}'")
-                else:
-                    print(f"ℹ️ Query Expansion: No single strong match found (Best score: {best_overall_score} < {KB_MATCH_THRESHOLD}). Using original query '{original_query}' for search.")
-                    expanded_query = original_query
+                # Prompt an Gemini: Extrahiere die Kernbegriffe
+                extraction_prompt = f"""Analyze the following user request for Disney Infinity Toyboxes. Identify the **absolute core keywords or concepts** (like specific characters 'Stitch', 'Iron Man'; franchises 'Star Wars', 'Marvel'; locations 'Endor'; game types 'racing', 'combat'; episodes 'Episode 6'). Ignore generic filler words ('I want to play', 'find', 'show me', 'toybox', 'level', 'any', 'some', 'a'), greetings, and irrelevant numbers or quantities. Return ONLY the extracted core keywords as a single string, separated by spaces. If no clear keywords are found, return the original request, shortened if necessary.
 
-                # 1. Access Toybox Data
-                all_toyboxes = getattr(bot, "toybox_data", [])
-                if not all_toyboxes:
-                    await message.channel.send("❌ Waaak! Can't access notes. Contact admin.")
-                    return
+User Request: "{original_query}"
 
-                # 2. Retrieve Relevant Toyboxes using Fuzzy Search
-                keywords_for_retrieval = expansion_keywords if triggered_expansion else set()
-                initially_retrieved_toyboxes = find_relevant_toyboxes( # Stellen Sie sicher, dass diese Funktion in V66.py korrekt definiert ist
-                    expanded_query,
-                    all_toyboxes,
-                    keywords_for_retrieval,
-                    max_results=15
+Extracted Keywords:"""
+
+                # API-Aufruf für die Extraktion
+                extraction_response = await asyncio.to_thread(
+                    gemini_model.generate_content,
+                    extraction_prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.1, # Niedrige Temperatur für präzise Extraktion
+                        max_output_tokens=60 # Begrenzte Länge für Keywords
+                    ),
+                    safety_settings=[ # Standard safety settings
+                       {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                       {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                       {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                       {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"}
+                    ]
                 )
 
-                if not initially_retrieved_toyboxes:
-                    no_results_embed = discord.Embed(
-                        title="🤔 Hmm, Quackers!",
-                        description=(
-                            f"Waaak! Even with my extra knowledge (if applicable), I couldn't find Toyboxes matching \"{original_query}\" in the collection. 🦆\n\n"
-                            f"**Maybe try asking differently?**\n"
-                            f"• Use different keywords (e.g., 'race track' instead of 'fast cars')\n"
-                            f"• Mention a character (like 'Iron Man' or 'Mickey')\n"
-                            f"• Specify a franchise (Star Wars, Marvel, Disney)\n"
-                            f"• Describe gameplay (like 'combat arena', 'platformer')"
-                        ),
-                        color=discord.Color.orange()
-                    )
-                    no_results_embed.set_thumbnail(url="https://i.imgur.com/FxMKfGt.png") # Donald confused
-                    no_results_embed.set_footer(text="Keep trying! We'll find something fun!")
-                    await message.channel.send(embed=no_results_embed)
-                    return
+                # Verarbeitung der Extraktionsantwort
+                if extraction_response.parts:
+                    extracted_keywords_str = extraction_response.text.strip()
+                    # Bereinigung: Entferne mögliche Anführungszeichen und normalisiere Leerzeichen
+                    extracted_keywords_str = re.sub(r'^"|"$', '', extracted_keywords_str) # Entferne Anführungszeichen am Anfang/Ende
+                    extracted_keywords_str = re.sub(r'[^\w\s-]', '', extracted_keywords_str) # Erlaube Buchstaben, Zahlen, Leerzeichen, Bindestriche
+                    extracted_keywords_str = re.sub(r'\s+', ' ', extracted_keywords_str).strip() # Normalisiere Leerzeichen
 
-                context_str = "Found these potentially relevant Toyboxes in our forum archive:\n\n"
-                context_limit = 10000 # Gemini Context Limit (ca.)
-                temp_context = ""
-                actual_toyboxes_in_context = []
-                for i, tb in enumerate(initially_retrieved_toyboxes, 1):
-                    toybox_name = tb.get('name', 'N/A').strip()
-                    toybox_desc = tb.get('description', '').strip() # Beschreibung für Kontext verwenden
-                    toybox_url = tb.get('url', '')
-                    toybox_tags = tb.get('tags', ['Other']) # Standard-Tag, falls keine vorhanden
-
-                    # Kurze Vorschau der Beschreibung
-                    if toybox_desc:
-                        desc_preview = ' '.join(toybox_desc.splitlines()) # Mehrzeilige Beschreibungen in eine Zeile
-                        desc_preview = desc_preview[:200] + ('...' if len(desc_preview) > 200 else '')
+                    if extracted_keywords_str: # Nur verwenden, wenn nach Bereinigung etwas übrig bleibt
+                         search_query = extracted_keywords_str
+                         print(f"🧠 LLM Keyword Extraction: Original='{original_query}' -> Extracted='{search_query}'")
                     else:
-                        desc_preview = "No description provided."
+                         print(f"⚠️ LLM Keyword Extraction resulted in empty string after cleaning. Falling back to original query.")
+                         # search_query bleibt original_query
+                else:
+                    # Handle blocked or empty response
+                    block_reason = "Unknown"
+                    if hasattr(extraction_response, 'prompt_feedback') and extraction_response.prompt_feedback:
+                        block_reason = extraction_response.prompt_feedback.block_reason or "Not specified"
+                    print(f"⚠️ LLM Keyword Extraction failed or blocked (Reason: {block_reason}) for query: '{original_query}'. Falling back to original query.")
+                    # search_query bleibt original_query
 
-                    entry_str = f"--- Toybox {i} ---\nName: {toybox_name}\nTags: {', '.join(toybox_tags)}\nDesc Preview: {desc_preview}\nLink: <{toybox_url}>\n\n"
+            except Exception as extraction_err:
+                print(f"❌ Error during LLM Keyword Extraction: {extraction_err}. Falling back to original query.")
+                # search_query bleibt original_query
 
-                    if len(context_str) + len(temp_context) + len(entry_str) > context_limit:
-                        print(f"Context limit ({context_limit}) reached. Stopping context inclusion at Toybox {i-1}.")
-                        break
-                    temp_context += entry_str
-                    actual_toyboxes_in_context.append(tb)
-                context_str += temp_context
-                context_str += "---\nEnd of Provided Toybox Information."
+            print(f"🔍 Using search query for retrieval: '{search_query}'")
 
-                if not actual_toyboxes_in_context: # Sollte nicht passieren, wenn initially_retrieved_toyboxes nicht leer ist, aber sicher ist sicher
-                    await message.channel.send("Waaak! The first found toybox info was too long to process. Try a more specific query? 🦆")
-                    return
+            # ==================================================================
+            # --- Schritt 2: (Optional) Knowledge Base Expansion basierend auf extrahierten Keywords ---
+            # ==================================================================
+            expansion_keywords = set()
+            triggered_expansion = False
+            best_matching_item = None # Wird für den finalen RAG-Prompt benötigt
+            KB_MATCH_THRESHOLD = 88 # Behalte Schwellenwert bei
 
-                prompt = f"""You are a specialized assistant for the Disney Infinity community Discord server. Your goal is to help users find Toyboxes shared in our forum based on their questions.
-You MUST base your answer **exclusively** on the "Provided Toybox Information" below. **Do not** use external knowledge, make up information, hallucinate details, or refer to toyboxes not listed here.
+            # Nur versuchen zu expandieren, wenn eine Knowledge Base existiert
+            # und die extrahierte Query nicht zu lang ist (verhindert unsinnige Expansion)
+            if bot.knowledge_base and len(search_query.split()) <= 5:
+                # Finde das *beste* passende Konzept in der KB für die *extrahierte* Query
+                best_kb_match = process.extractOne(
+                    search_query.lower(), # Vergleiche mit Lowercase
+                    [item.get('concept','').lower() for item in bot.knowledge_base if item.get('concept')],
+                    scorer=fuzz.token_set_ratio,
+                    score_cutoff=KB_MATCH_THRESHOLD
+                )
+
+                if best_kb_match:
+                    matched_concept_name, score = best_kb_match
+                    # Finde das vollständige Item, um Keywords zu extrahieren
+                    for item in bot.knowledge_base:
+                        if item.get('concept','').lower() == matched_concept_name:
+                            best_matching_item = item # Speichere das gefundene Item
+                            keywords_to_add = {k.lower() for k in item.get('keywords', []) if k}
+                            if keywords_to_add:
+                                expansion_keywords = keywords_to_add
+                                triggered_expansion = True
+                                print(f"💡 KB Expansion triggered based on extracted term '{search_query}' matching KB concept '{matched_concept_name}' (Score: {score}). Added boost keywords: {expansion_keywords}")
+                            break
+            # Wenn keine Expansion ausgelöst wurde oder die KB leer ist, bleibt expansion_keywords leer.
+
+            # ==================================================================
+            # --- Schritt 3: Rufe find_relevant_toyboxes mit der bereinigten Query auf ---
+            # ==================================================================
+            all_toyboxes = bot.toybox_data
+            if not all_toyboxes:
+                data_exists = os.path.exists(toybox_data_file)
+                if data_exists and message.guild: await message.channel.send(f"Hmm, my notes look empty... `/update_toyboxes` might help! 🦆")
+                elif not data_exists and message.guild: await message.channel.send(f"❌ Uh oh! `{toybox_data_file}` is missing. `/update_toyboxes` needed.")
+                else: await message.channel.send("❌ Waaak! Can't access notes. Contact admin.")
+                return
+
+            # WICHTIG: Übergib die 'search_query' (extrahierte Keywords) an die Funktion
+            # Die 'expansion_keywords' kommen aus dem optionalen Schritt 2 und dienen nur zum Boosten
+            initially_retrieved_toyboxes = find_relevant_toyboxes(
+                search_query, # Die (potenziell von LLM extrahierte) Hauptsuchanfrage
+                all_toyboxes,
+                expansion_keywords, # Keywords aus der KB-Expansion zum Boosten (kann leer sein)
+                max_results=15
+            )
+
+            # ==================================================================
+            # --- Schritt 4 & 5: Kontext bauen und an Gemini für die RAG-Antwort senden ---
+            # ==================================================================
+            if not initially_retrieved_toyboxes:
+                 # Nachricht angepasst, um die verwendeten Suchbegriffe zu nennen
+                 no_results_embed = discord.Embed(
+                    title="🤔 Hmm, Quackers!",
+                    description=(
+                        f"Waaak! I looked for Toyboxes matching '**{search_query}**' but couldn't find anything specific in the collection this time. 🦆\n\n"
+                        f"**Maybe try asking differently?**\n"
+                        f"• Use other related terms.\n"
+                        f"• Be more general or more specific.\n"
+                        f"• Mention a character, franchise, or game type."
+                    ),
+                    color=discord.Color.orange()
+                )
+                 no_results_embed.set_thumbnail(url="https://i.imgur.com/FxMKfGt.png")
+                 no_results_embed.set_footer(text="Keep trying! We'll find something fun!")
+                 await message.channel.send(embed=no_results_embed)
+                 return
+
+            # --- Context Building (Logik bleibt gleich) ---
+            context_str = "Found these potentially relevant Toyboxes in our forum archive:\n\n"
+            context_limit = 10000 # Limit für Kontextlänge
+            temp_context = ""
+            actual_toyboxes_in_context = []
+
+            for i, tb in enumerate(initially_retrieved_toyboxes, 1):
+                toybox_name = tb.get('name', 'N/A').strip()
+                toybox_desc = tb.get('description', '').strip()
+                toybox_url = tb.get('url', '')
+                toybox_tags = tb.get('tags', ['Other'])
+                desc_preview = "No description provided."
+                if toybox_desc:
+                    # Versuche Zeilenumbrüche durch Leerzeichen zu ersetzen für kompaktere Vorschau
+                    desc_preview = ' '.join(toybox_desc.splitlines())
+                    desc_preview = desc_preview[:200] + ('...' if len(desc_preview) > 200 else '')
+
+                entry_str = f"--- Toybox {i} ---\nName: {toybox_name}\nTags: {', '.join(toybox_tags)}\nDesc Preview: {desc_preview}\nLink: <{toybox_url}>\n\n"
+                # Prüfe, ob das Hinzufügen dieses Eintrags das Limit überschreitet
+                if len(context_str) + len(temp_context) + len(entry_str) > context_limit:
+                    print(f"Context limit ({context_limit}) reached. Stopping context inclusion at Toybox {i-1}.")
+                    break
+                temp_context += entry_str
+                actual_toyboxes_in_context.append(tb) # Füge Toybox hinzu, die tatsächlich im Kontext ist
+
+            # Füge den gesammelten Kontext hinzu
+            context_str += temp_context
+            context_str += "---\nEnd of Provided Toybox Information."
+
+            # Sicherheitscheck: Wenn nach dem Limit-Check keine Toyboxen im Kontext sind
+            if not actual_toyboxes_in_context:
+                 await message.channel.send("Waaak! The first found toybox info was too long to process even alone. Try a much more specific query? 🦆")
+                 return
+
+
+            # --- Angepasster RAG-Prompt für Gemini ---
+            # Erwähnt Originalanfrage und extrahierte Suchbegriffe
+            prompt = f"""You are a specialized, friendly and helpful assistant for the Disney Infinity community Discord server. Your goal is to help users find Toyboxes shared in the forum based on their questions, using ONLY the provided context. Be conversational and enthusiastic!
 
 **Background:**
-- The user asked the original question: "{original_query}"
-- To help find relevant results, the search was potentially expanded using related keywords based on the identified concept: '{best_matching_item.get('concept', 'N/A') if best_matching_item else 'None Identified'}'.
-- The "Provided Toybox Information" below contains the results found using this potentially expanded search. These results might include Toyboxes very specific to the query, or Toyboxes related through shared characters or themes.
+- The user's original request was: "{original_query}"
+- To focus the search, the key subjects identified from the request were: "{search_query}"
+- {("(Optional: The search was potentially boosted with related keywords for the concept '" + best_matching_item['concept'] + "': " + str(expansion_keywords) + ")") if triggered_expansion and best_matching_item else "(Optional: No relevant knowledge base concept found for boosting.)"}- The "Provided Toybox Information" below contains search results based on the identified key subjects "{search_query}".
 
 **Instructions:**
-1. Identify the core **subject or topic** the user is asking about in their original question: "{original_query}". The central theme is related to '{best_matching_item.get('concept', 'User Query') if best_matching_item else original_query}'. Let's call this the 'User Topic'.
+1. Identify the core **subject or topic** the user is asking about, considering both their original request ("{original_query}") and the extracted search terms ("{search_query}"). Let's call this the 'User Topic'.
 2. Carefully examine **each** item in the "Provided Toybox Information".
-3. For each Toybox, determine if it is **genuinely relevant** to the 'User Topic' (especially the concept '{best_matching_item.get('concept', 'User Query') if best_matching_item else original_query}').
-    - **High Relevance:** The Toybox name, tags, or description *directly* relates to the 'User Topic' or its associated concept (e.g., contains "Endor", "Ewoks", "Return of the Jedi", "Rebellion", "Death Star II" when the topic is Episode 6; contains "Racing" when the topic is racing).
-    - **Consider Relevance:** Even if the Toybox title doesn't exactly match the original query phrase, it is relevant if its content (judging by name, tags like "Star Wars", description preview) clearly relates to the 'User Topic'.
-    - **Ignore if irrelevant:** Disregard Toyboxen that seem completely unrelated to the 'User Topic', even if they appeared in the search results.
+3. For each Toybox, determine if it is **genuinely relevant** to the 'User Topic' (especially related to '{search_query}').
+    - **High Relevance:** Name, tags, or description *directly* relate to the 'User Topic' or the search terms '{search_query}'.
+    - **Consider Relevance:** Even if the title doesn't exactly match, it's relevant if its content (judging by name, tags, description preview) clearly relates to the 'User Topic'/{search_query}.
+    - **Ignore if irrelevant:** Disregard Toyboxes that seem unrelated to the 'User Topic'/{search_query}, even if they appeared in the search results.
 4. Formulate a helpful and conversational response based **only** on the relevant Toyboxen you identified:
     - **If relevant Toyboxen were found:**
-        - Start with a positive confirmation based on the 'User Topic'. Examples: "Okay, I found some Toyboxes related to Episode 5!", "Sure, here are some Toyboxes featuring Han Solo:", "Alright, check out these Toyboxes related to Dagobah:". Adapt the intro to the 'User Topic' you identified.
+        - Start with a positive confirmation related to the 'User Topic'/{search_query}. Examples: "Oh boy, oh boy! I found some Toyboxes about {search_query}!", "Waaak! Look what I dug up for '{search_query}':", "Quack-tastic! Check out these Toyboxes featuring {search_query}:".
         - Recommend **only** the Toyboxen you deemed relevant in step 3, up to a maximum of 10.
         - For each recommended Toybox:
-            - Use the Toybox Name as a **Markdown H2 heading** (e.g., `## Invasion of Dagobah`).
-            - On the **next line**, briefly explain *why it's relevant* to the 'User Topic' or the identified concept ('{best_matching_item.get('concept', 'User Query') if best_matching_item else original_query}'), citing specific details from the context (e.g., "This one is set on Endor, the location of the final battle in Episode 6." or "Features the Rebellion, a key faction in Episode 6.").
+            - Use the Toybox Name as a **Markdown H2 heading** (e.g., `## Stitch's Great Escape`).
+            - On the **next line**, briefly explain *why it's relevant* to the 'User Topic' or '{search_query}', citing details from the context (e.g., "This one features Stitch himself!" or "This race track sounds perfect for what you asked!").
             - Immediately following, include the **Link** as a **Markdown bullet point**: `* [🔗 Link](<URL>)`
-    - **If, after careful review, none of the PROVIDED Toyboxen seem relevant to the 'User Topic':**
-        - State clearly that none of the specific options **I examined from the search results** seemed to fit the 'User Topic' ({original_query}). <-- Nutze hier die Originalanfrage als Referenz.
-        - Briefly explain *why* based on the topic (e.g., "The results mostly contained general Star Wars levels or items from other Episodes...").
-        - Encourage them to try different terms.
-    - **Strictly adhere to the provided information.** Do not add closing remarks.
+    - **If, after careful review, none of the PROVIDED Toyboxen seem relevant to the 'User Topic'/{search_query}:**
+        - State clearly in that none of the specific options **I examined from the search results** seemed to fit '{search_query}'. Example: "Aw, phooey! I looked through the list for '{search_query}', but none of these seem quite right..."
+        - Briefly explain *why* based on the topic (e.g., "...they were mostly about other characters!").
+        - Encourage them to try different terms. Example: "Maybe try asking for something else?"
+    - **Strictly adhere to the provided information.** Do not make up details or add closing remarks like "Let me know...".
 
 **Provided Toybox Information (Context - Use ONLY This):**
 {context_str}
 
-**User's Original Question:**
-{original_query}
+**User's Original Question:** {original_query}
+**(Search focused on:** {search_query}**)
 
-**Your Answer (Respond conversationally following all instructions, focusing *only* on relevant items from the provided context):**
+**Your Answer (Respond following all instructions, focusing *only* on relevant items from the provided context):**
 """
-                try:
-                    response = await asyncio.to_thread(
-                        gemini_model.generate_content,
-                        prompt,
-                        generation_config=genai.types.GenerationConfig(temperature=0.4),
-                        safety_settings=[
-                            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-                            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-                            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-                            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"}
-                        ]
-                    )
-                    if not response.parts:
-                        block_reason = "Unknown"
-                        safety_ratings_str = "N/A"
-                        if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
-                            block_reason = response.prompt_feedback.block_reason or "Not specified"
-                            safety_ratings_str = str(response.prompt_feedback.safety_ratings) if response.prompt_feedback.safety_ratings else "N/A"
-                        print(f"Gemini response potentially blocked or empty (Thread {message.channel.id}). Reason: {block_reason}, Safety: {safety_ratings_str}")
-                        await message.channel.send(f"⚠️ Waaak! My response got filtered (Reason: `{block_reason}`). Ask differently? 🦆")
-                        return
-                    answer = response.text
-                except Exception as gemini_err:
-                    print(f"❌ Gemini API Error (Thread {message.channel.id}): {gemini_err}\n{traceback.format_exc()}")
-                    error_msg = f"🤖 Waaak! Brain snag ({type(gemini_err).__name__}). Try again? 🦆"
-                    await message.channel.send(error_msg)
-                    return
+
+            # ==================================================================
+            # --- Schritt 6: Sende RAG-Prompt an Gemini und verarbeite Antwort ---
+            # ==================================================================
+            try:
+                # print(f"--- Sending RAG Prompt to Gemini (Length: {len(prompt)}) ---") # Debug Prompt
+                # print(prompt[-1000:]) # Debug last part of prompt
+                # print(f"--- End RAG Prompt ---") # Debug
+
+                response = await asyncio.to_thread(
+                    gemini_model.generate_content,
+                    prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=0.5 # Etwas höhere Temperatur für Donalds Persönlichkeit
+                        ),
+                    safety_settings=[ # Standard safety settings
+                       {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                       {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                       {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+                       {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"}
+                    ]
+                )
+
+                # --- Process Response (Logik bleibt gleich) ---
+                if not response.parts:
+                     block_reason = "Unknown"
+                     safety_ratings_str = "N/A"
+                     if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+                         block_reason = response.prompt_feedback.block_reason or "Not specified"
+                         safety_ratings_str = str(response.prompt_feedback.safety_ratings) if response.prompt_feedback.safety_ratings else "N/A"
+                     print(f"Gemini RAG response potentially blocked or empty (Thread {message.channel.id}). Reason: {block_reason}, Safety: {safety_ratings_str}")
+                     await message.channel.send(f"⚠️ Waaak! My response got filtered (Reason: `{block_reason}`). Could you ask differently? 🦆")
+                     return
+
+                answer = response.text.strip() # .strip() hinzugefügt
+                # print(f"+++ Received Gemini RAG Response (Thread {message.channel.id}) +++\n{answer}\n+++ End Response +++") # Debug
+
+            except ValueError as ve:
+                print(f"❌ Gemini Configuration/Value Error (RAG) (Thread {message.channel.id}): {ve}")
+                error_msg = "❌ Waaak! Setup wrong (Config Error). Tell admin!"
+                if "api key" in str(ve).lower(): error_msg = "❌ Uh oh! Connection bad (API Key issue). Tell admin!"
+                await message.channel.send(error_msg)
+                return
+            except Exception as gemini_err:
+                print(f"❌ Gemini API Error (RAG) (Thread {message.channel.id}): {gemini_err}\n{traceback.format_exc()}")
+                error_msg = f"🤖 Waaak! Brain snag ({type(gemini_err).__name__}). Try again? 🦆"
+                err_str = str(gemini_err).lower()
+                if "api key not valid" in err_str: error_msg = "❌ Uh oh! Connection bad (Invalid API key). Tell admin!"
+                elif "quota" in err_str or "rate limit" in err_str: error_msg = "🦆 Aw, phooey! Too much thinking! (Quota/Rate Limit). Try later?"
+                elif "resource has been exhausted" in err_str: error_msg = "🦆 Waaak! System busy! Try later!"
+                elif "model `gemini" in err_str and "not found" in err_str: error_msg = f"❌ Uh oh! AI model missing! Tell admin!"
+                elif "internal error" in err_str or "server error" in err_str: error_msg = "⚙️ Aw, nuts! AI glitch! Try again!" # Generischer Serverfehler hinzugefügt
+                await message.channel.send(error_msg)
+                return
 
                 # Send formatted response
-                try:
-                    response_embed = discord.Embed(
-                        title="🦆 Toybox Recommendations:",
-                        description=answer[:4096] if len(answer) <= 4096 else answer[:4093] + "...",
-                        color=discord.Color.random()
-                    )
-                    await message.channel.send(embed=response_embed)
-                    if len(answer) > 4096:
-                        remaining_text = "[...]\n" + answer[4096:]
-                        MAX_MSG_LENGTH = 2000
-                        remaining_chunks = [remaining_text[i:i+MAX_MSG_LENGTH] for i in range(0, len(remaining_text), MAX_MSG_LENGTH)]
-                        for chunk in remaining_chunks:
-                            await message.channel.send(chunk)
-                            await asyncio.sleep(0.6)
-                except Exception as e:
-                    print(f"Unexpected error in send_formatted_response: {e}\n{traceback.format_exc()}")
-                    # Fallback to sending plain text if embed fails
-                    await message.channel.send(f"Aw, phooey! Something went wrong displaying the results.\n\nHere's what I found:\n{answer}")
-
+            try:
+                response_embed = discord.Embed(
+                    title="🦆 Toybox Recommendations:",
+                    description=answer[:4096] if len(answer) <= 4096 else answer[:4093] + "...",
+                    color=discord.Color.random()
+                )
+                await message.channel.send(embed=response_embed)
+                if len(answer) > 4096:
+                    remaining_text = "[...]\n" + answer[4096:]
+                    MAX_MSG_LENGTH = 2000
+                    remaining_chunks = [remaining_text[i:i+MAX_MSG_LENGTH] for i in range(0, len(remaining_text), MAX_MSG_LENGTH)]
+                    for chunk in remaining_chunks:
+                        await message.channel.send(chunk)
+                        await asyncio.sleep(0.6)
             except Exception as e:
-                print(f"❌ Unexpected Error during RAG processing in thread {message.channel.id}:")
-                print(traceback.format_exc())
-                await message.channel.send(f"🦆 Waaak! Unexpected error ({type(e).__name__}). Logged. Try again or tell admin!")
-        return # Wichtig: Beende die Funktion hier, da die AI-Chat-Nachricht behandelt wurde
+                print(f"Unexpected error in send_formatted_response: {e}\n{traceback.format_exc()}")
+                # Fallback to sending plain text if embed fails
+                await message.channel.send(f"Aw, phooey! Something went wrong displaying the results.\n\nHere's what I found:\n{answer}")
+
+        except Exception as e:
+            print(f"❌ Unexpected Error during RAG processing in thread {message.channel.id}:")
+            print(traceback.format_exc())
+            await message.channel.send(f"🦆 Waaak! Unexpected error ({type(e).__name__}). Logged. Try again or tell admin!")
+            return # Wichtig: Beende die Funktion hier, da die AI-Chat-Nachricht behandelt wurde
 
     # --- DANN: count_publish Logik ---
     # Dieser Code wird nur ausgeführt, wenn es KEINE AI-Chat-Nachricht war
@@ -3845,6 +3978,8 @@ async def on_ready():
     except Exception as e:
         print(f"⚠️ Could not load toybox database: {e}")
         bot.toybox_data = []
+
+
 
     # Sync commands and register views
     try:
