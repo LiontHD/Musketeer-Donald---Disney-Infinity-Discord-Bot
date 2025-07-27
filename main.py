@@ -1126,47 +1126,16 @@ class SimpleTagAnalyzer:
             
         return tags
 
-class MyBot(commands.Bot):
+class Bot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
         super().__init__(command_prefix="/", intents=intents)
-
+        
     async def setup_hook(self):
-        # HIER KOMMT DIE GANZE START-LOGIK HIN
+        print("Bot is setting up...")
 
-        # 1. Lade alle Cogs aus dem 'cogs'-Ordner
-        print("--- Loading Cogs ---")
-        for filename in os.listdir('./cogs'):
-            if filename.endswith('.py'):
-                try:
-                    await self.load_extension(f'cogs.{filename[:-3]}')
-                    print(f"✅ Loaded Cog: {filename}")
-                except Exception as e:
-                    print(f"❌ Failed to load cog {filename}:")
-                    traceback.print_exc()
-        
-        # 2. Registriere persistente Views (falls noch nicht in der Cog selbst)
-        self.add_view(AskToyboxPanelView()) # Beispiel
-        
-        # 3. Synchronisiere die Befehle mit Discord
-        try:
-            synced = await self.tree.sync()
-            print(f"--- Synced {len(synced)} command(s) ---")
-        except Exception as e:
-            print(f"Error syncing commands: {e}")
-
-    async def on_ready(self):
-        # DIESE FUNKTION IST JETZT VIEL AUFGERÄUMTER
-        print(f'Bot is ready! Logged in as {self.user.name}')
-        await self.change_presence(activity=discord.Game(name="Community Toyboxes"))
-        
-        # Das Laden von Daten wie Ratings ist hier ok, da es schnell geht
-        load_ratings()
-
-
-# Instanz der neuen Klasse erstellen
-bot = MyBot()
+bot = Bot()
 
 async def update_toybox_database(guild: discord.Guild):
     forum_channel = guild.get_channel(forum_channel_id)
@@ -3978,8 +3947,6 @@ async def on_ready():
     except Exception as e:
         print(f"⚠️ Could not load toybox database: {e}")
         bot.toybox_data = []
-
-
 
     # Sync commands and register views
     try:
