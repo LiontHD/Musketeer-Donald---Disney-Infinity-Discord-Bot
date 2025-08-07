@@ -32,6 +32,7 @@ import google.generativeai as genai
 from thefuzz import fuzz, process
 from typing import Union
 import traceback
+import requests
 
 
 # Discord Bot Token
@@ -44,13 +45,14 @@ knowledge_base_file = "knowledge_base.json"
 toybox_data_file = "toybox_data.json"
 TARGET_PURGE_CHANNEL_ID = 1361838497740095558
 BLACKLIST_FILE = "blacklisted_threads.json"
+FORUM_CHANNEL_ID = 1253093395920851054 
 
 
 gemini_model = None
 if GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        gemini_model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        gemini_model = genai.GenerativeModel('gemini-2.5-flash')
         print("✅ Google Gemini Initialized.")
     except Exception as e:
         print(f"⚠️ Error initializing Google Gemini: {e}. AI features will be disabled.")
@@ -62,34 +64,50 @@ intents = discord.Intents.default()
 intents.message_content = True  # Stelle sicher, dass diese Intention gesetzt ist
 
 
-# Airtable Test
+# --- Airtable Setup (Dynamisch) ---
 
-AIRTABLE_TABLES = {
-    "modeltrainman": "Modeltrainman",
-    "bowtieguy": "The Bow-Tie Guy",
-    "allnightgaming": "Allnightgaming",
-    "thatbrownbat": "ThatBrownBat",
-    "72pringle": "72Pringle",
-    "jk": "JK",
-    "misc": "Misc"
-}
-FORUM_CHANNEL_ID = 1253093395920851054 
+def generate_table_key(name: str) -> str:
+    """Wandelt einen Tabellennamen in einen einfachen, klein geschriebenen Schlüssel um."""
+    import re
+    return re.sub(r'[^a-z0-9]', '', name.lower())
 
-# Initialize Airtable connection
+def fetch_airtable_metadata(api_key: str, base_id: str):
+    """Ruft Tabellennamen von Airtable ab und erstellt eine Zuordnung sowie Befehlsoptionen."""
+    tables_map = {}
+    choices_list = []
+    url = f"https://api.airtable.com/v0/meta/bases/{base_id}/tables"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    
+    try:
+        print("🔄 Fetching Airtable metadata...")
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()  # Wirft einen Fehler bei einer fehlerhaften Anfrage
+        data = response.json()
+        
+        for table in data.get('tables', []):
+            table_name = table.get('name')
+            if table_name:
+                table_key = generate_table_key(table_name)
+                tables_map[table_key] = table_name
+                choices_list.append(discord.app_commands.Choice(name=table_name, value=table_key))
+        
+        print(f"✅ Found {len(tables_map)} tables: {list(tables_map.values())}")
+        return tables_map, choices_list
+        
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Error fetching Airtable metadata: {e}")
+        # Als Fallback eine leere Liste zurückgeben, damit der Bot nicht abstürzt
+        return {}, []
+
+# Metadaten einmal beim Start abrufen
+AIRTABLE_TABLES, CREATOR_CHOICES = fetch_airtable_metadata(AIRTABLE_API_KEY, AIRTABLE_BASE_ID)
+
+# Initialisierung der Airtable-Verbindung (bleibt fast gleich)
 airtable = Api(AIRTABLE_API_KEY)
 tables = {
     table_key: airtable.table(AIRTABLE_BASE_ID, table_name)
     for table_key, table_name in AIRTABLE_TABLES.items()
 }
-
-post_id = "recaMjlETRnfUdFus"  # Setze hier eine gültige Record-ID aus deiner Airtable-Tabelle
-
-url = f"https://api.airtable.com/v0/{AIRTABLE_BASE_ID}/Allnightgaming/{post_id}"
-headers = {"Authorization": f"Bearer {AIRTABLE_API_KEY}"}
-response = requests.get(url, headers=headers)
-
-print(response.json())  # Gibt zurück, was Airtable tatsächlich liefert
-
 
 VALID_TAGS = ["Disney", "Marvel", "Star Wars", "Other"]
 
@@ -1126,16 +1144,47 @@ class SimpleTagAnalyzer:
             
         return tags
 
-class Bot(commands.Bot):
+class MyBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
         super().__init__(command_prefix="/", intents=intents)
-        
-    async def setup_hook(self):
-        print("Bot is setting up...")
 
-bot = Bot()
+    async def setup_hook(self):
+        # HIER KOMMT DIE GANZE START-LOGIK HIN
+
+        # 1. Lade alle Cogs aus dem 'cogs'-Ordner
+        print("--- Loading Cogs ---")
+        for filename in os.listdir('./cogs'):
+            if filename.endswith('.py'):
+                try:
+                    await self.load_extension(f'cogs.{filename[:-3]}')
+                    print(f"✅ Loaded Cog: {filename}")
+                except Exception as e:
+                    print(f"❌ Failed to load cog {filename}:")
+                    traceback.print_exc()
+        
+        # 2. Registriere persistente Views (falls noch nicht in der Cog selbst)
+        self.add_view(AskToyboxPanelView()) # Beispiel
+        
+        # 3. Synchronisiere die Befehle mit Discord
+        try:
+            synced = await self.tree.sync()
+            print(f"--- Synced {len(synced)} command(s) ---")
+        except Exception as e:
+            print(f"Error syncing commands: {e}")
+
+    async def on_ready(self):
+        # DIESE FUNKTION IST JETZT VIEL AUFGERÄUMTER
+        print(f'Bot is ready! Logged in as {self.user.name}')
+        await self.change_presence(activity=discord.Game(name="Community Toyboxes"))
+        
+        # Das Laden von Daten wie Ratings ist hier ok, da es schnell geht
+        load_ratings()
+
+
+# Instanz der neuen Klasse erstellen
+bot = MyBot()
 
 async def update_toybox_database(guild: discord.Guild):
     forum_channel = guild.get_channel(forum_channel_id)
@@ -1355,17 +1404,8 @@ async def update_toyboxes_cmd(interaction: discord.Interaction):
         await interaction.followup.send("❌ Toybox database update failed. Check bot logs for details.", ephemeral=True)
 
 @bot.tree.command(name="post", description="Create a forum post from Airtable data")
-@discord.app_commands.choices(
-    creator=[
-        discord.app_commands.Choice(name="Modeltrainman", value="modeltrainman"),
-        discord.app_commands.Choice(name="The Bow-Tie Guy", value="bowtieguy"),
-        discord.app_commands.Choice(name="Allnightgaming", value="allnightgaming"),
-        discord.app_commands.Choice(name="ThatBrownBat", value="thatbrownbat"),
-        discord.app_commands.Choice(name="72Pringle", value="72pringle"),
-        discord.app_commands.Choice(name="Misc", value="misc"),
-        discord.app_commands.Choice(name="JK", value="jk")
-    ]
-)
+@discord.app_commands.choices(creator=CREATOR_CHOICES)
+
 async def post(interaction: discord.Interaction, post_id: str, creator: str):
     print(f"Post ID: {post_id}, Creator: {creator}")  # Debugging
     
@@ -2938,17 +2978,7 @@ class PlayView(discord.ui.View):
     name="batch_infos",
     description="Extracts metadata from ZIP files for all records in a specified creator's table"
 )
-@discord.app_commands.choices(
-    creator=[
-        discord.app_commands.Choice(name="Modeltrainman", value="modeltrainman"),
-        discord.app_commands.Choice(name="The Bow-Tie Guy", value="bowtieguy"),
-        discord.app_commands.Choice(name="Allnightgaming", value="allnightgaming"),
-        discord.app_commands.Choice(name="ThatBrownBat", value="thatbrownbat"),
-        discord.app_commands.Choice(name="72Pringle", value="72pringle"),
-        discord.app_commands.Choice(name="Misc", value="misc"),
-        discord.app_commands.Choice(name="JK", value="jk")
-    ]
-)
+@discord.app_commands.choices(creator=CREATOR_CHOICES)
 async def batch_infos(interaction: discord.Interaction, creator: str):
     await interaction.response.defer()
     
@@ -3082,17 +3112,8 @@ async def batch_infos(interaction: discord.Interaction, creator: str):
     name="infos",
     description="Extracts metadata from ZIP file in Airtable and updates the record"
 )
-@discord.app_commands.choices(
-    creator=[
-        discord.app_commands.Choice(name="Modeltrainman", value="modeltrainman"),
-        discord.app_commands.Choice(name="The Bow-Tie Guy", value="bowtieguy"),
-        discord.app_commands.Choice(name="Allnightgaming", value="allnightgaming"),
-        discord.app_commands.Choice(name="ThatBrownBat", value="thatbrownbat"),
-        discord.app_commands.Choice(name="72Pringle", value="72pringle"),
-        discord.app_commands.Choice(name="Misc", value="misc"),
-        discord.app_commands.Choice(name="JK", value="jk")
-    ]
-)
+@discord.app_commands.choices(creator=CREATOR_CHOICES)
+
 async def infos(interaction: discord.Interaction, post_id: str, creator: str):
     await interaction.response.defer()
     
@@ -3947,6 +3968,8 @@ async def on_ready():
     except Exception as e:
         print(f"⚠️ Could not load toybox database: {e}")
         bot.toybox_data = []
+
+
 
     # Sync commands and register views
     try:
