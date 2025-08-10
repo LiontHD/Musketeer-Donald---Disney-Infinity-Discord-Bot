@@ -2680,6 +2680,144 @@ async def toybox_game_to_toybox(
         )
         return
 
+
+
+
+@bot.tree.command(
+    name="batch_change_number",
+    description="Changes numbers in multiple toybox ZIP files at once."
+)
+@app_commands.describe(
+    numbers="A comma-separated list of new numbers (e.g., '300,256,288'). Order must match files.",
+    file1="The first ZIP file.",
+    file2="The second ZIP file (optional).",
+    file3="The third ZIP file (optional).",
+    file4="The fourth ZIP file (optional).",
+    file5="The fifth ZIP file (optional).",
+    file6="The sixth ZIP file (optional).",  
+    file7="The seventh ZIP file (optional).",
+    file8="The eighth ZIP file (optional).",
+    file9="The nineth ZIP file (optional).",
+    file10="The tenth ZIP file (optional)."
+)
+async def batch_change_number(
+    interaction: discord.Interaction,
+    numbers: str,
+    file1: discord.Attachment,
+    file2: Optional[discord.Attachment] = None,
+    file3: Optional[discord.Attachment] = None,
+    file4: Optional[discord.Attachment] = None,
+    file5: Optional[discord.Attachment] = None,
+    file6: Optional[discord.Attachment] = None,
+    file7: Optional[discord.Attachment] = None,
+    file8: Optional[discord.Attachment] = None,
+    file9: Optional[discord.Attachment] = None,
+    file10: Optional[discord.Attachment] = None
+
+):
+    await interaction.response.defer(ephemeral=True)
+
+    # 1. Sammle alle gültigen Anhänge
+    attachments = [f for f in [file1, file2, file3, file4, file5, file6, file7, file8, file9, file10] if f is not None]
+
+    # 2. Parse die Zahlen-Zeichenkette
+    try:
+        # Entferne Leerzeichen und splitte am Komma, ignoriere leere Ergebnisse
+        new_numbers_str = [num.strip() for num in numbers.split(',') if num.strip()]
+        new_numbers = [int(n) for n in new_numbers_str]
+    except ValueError:
+        await interaction.followup.send(
+            "❌ **Fehler:** Ungültiges Zahlenformat. Bitte gib eine durch Kommas getrennte Liste von ganzen Zahlen an (z.B. `300,256,288`).",
+            ephemeral=True
+        )
+        return
+
+    # 3. Validierung
+    if len(attachments) != len(new_numbers):
+        await interaction.followup.send(
+            f"❌ **Fehler:** Die Anzahl der Dateien und Zahlen stimmt nicht überein. "
+            f"Du hast **{len(attachments)}** Datei(en) und **{len(new_numbers)}** Zahl(en) angegeben.",
+            ephemeral=True
+        )
+        return
+
+    if not all(att.filename.endswith('.zip') for att in attachments):
+        await interaction.followup.send(
+            "❌ **Fehler:** Alle hochgeladenen Dateien müssen `.zip`-Dateien sein.",
+            ephemeral=True
+        )
+        return
+        
+    for number in new_numbers:
+        if not (1 <= number <= 999): # oder welche Grenze auch immer sinnvoll ist
+             await interaction.followup.send(
+                f"❌ **Fehler:** Die Zahl `{number}` ist ungültig. Bitte verwende Zahlen zwischen 1 und 999.",
+                ephemeral=True
+             )
+             return
+
+    try:
+        # Erstelle eine "Master"-ZIP-Datei im Arbeitsspeicher
+        master_zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(master_zip_buffer, 'w', zipfile.ZIP_DEFLATED) as master_zip:
+            
+            # 4. Verarbeitungsschleife
+            for attachment, new_number in zip(attachments, new_numbers):
+                # Lese die hochgeladene ZIP-Datei
+                input_zip_content = await attachment.read()
+                
+                # Erstelle eine modifizierte ZIP-Datei im Arbeitsspeicher
+                modified_zip_buffer = io.BytesIO()
+                with zipfile.ZipFile(modified_zip_buffer, 'w', zipfile.ZIP_DEFLATED) as modified_zip:
+                    
+                    with zipfile.ZipFile(io.BytesIO(input_zip_content), 'r') as input_zip:
+                        # Finde den Ordnernamen innerhalb der ZIP
+                        folder_name = None
+                        for name in input_zip.namelist():
+                            if name.endswith('/'):
+                                folder_name = name
+                                break
+                        
+                        if not folder_name:
+                            # Wenn kein Ordner gefunden wird, fahre fort, aber ohne Ordnerstruktur
+                            # Dies kann zu einem Fehler führen, wenn der Client es erwartet. Eine Warnung ist besser.
+                            await interaction.followup.send(f"⚠️ **Warnung:** In `{attachment.filename}` wurde kein Hauptordner gefunden. Die Struktur könnte beschädigt werden.", ephemeral=True)
+                            
+                        # Verarbeite jede Datei in der hochgeladenen ZIP
+                        for file_info in input_zip.infolist():
+                            if file_info.is_dir():
+                                continue # Überspringe Verzeichnisse
+                                
+                            content = input_zip.read(file_info.filename)
+                            base_name = os.path.basename(file_info.filename)
+
+                            # Ersetze die Nummer mit Regex
+                            new_name = re.sub(r'\d+([A-Z]?)$', f"{new_number}\\1", base_name)
+                            
+                            # Schreibe die Datei mit neuem Namen in die modifizierte ZIP
+                            new_path = os.path.join(folder_name, new_name) if folder_name else new_name
+                            modified_zip.writestr(new_path, content)
+
+                # Füge die fertig modifizierte ZIP-Datei zur Master-ZIP hinzu
+                modified_zip_buffer.seek(0)
+                master_zip.writestr(f"modified_{attachment.filename}", modified_zip_buffer.read())
+
+        # 5. Sende die Master-ZIP-Datei
+        master_zip_buffer.seek(0)
+        await interaction.followup.send(
+            "✅ **Erfolg!** Deine ZIP-Dateien wurden erfolgreich bearbeitet. Hier ist das Ergebnis:",
+            file=discord.File(master_zip_buffer, "batch_modified_files.zip")
+        )
+
+    except Exception as e:
+        print(f"Ein Fehler ist im 'batch_change_number' Befehl aufgetreten: {e}")
+        await interaction.followup.send(
+            f"Ein unerwarteter Fehler ist aufgetreten: `{str(e)}`",
+            ephemeral=True
+        )
+
+
+
 @bot.tree.command(
     name="change_number",
     description="Change the number in toybox or toybox game files inside a ZIP"
