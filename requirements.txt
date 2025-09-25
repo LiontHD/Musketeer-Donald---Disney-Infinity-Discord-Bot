@@ -1,0 +1,10 @@
+discord.py
+python-dotenv
+aiofiles
+networkx
+thefuzz
+pyairtable
+requests
+aiohttp
+google-generativeai
+asyncio

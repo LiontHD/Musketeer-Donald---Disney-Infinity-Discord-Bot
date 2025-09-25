@@ -1,0 +1,72 @@
+[
+  {
+    "concept": "Rogue One: A Star Wars Story (2016)",
+    "aliases": ["Rogue One", "2016", "Star Wars Story", "Rogue one", "Rogue One: A Star Wars Story"],
+    "keywords": ["Darth Vader", "Jyn Erso", "Jedha", "Cassian Andor", "K-2SO", "Chirrut Îmwe", "Baze Malbus", "Orson Krennic", "Death Star", "Rebellion", "Empire", "Scarif"]
+  },
+  {
+    "concept": "Solo: A Star Wars Story (2018)",
+    "aliases": ["Solo", "2018", "Star Wars Story", "Solo: A Star Wars Story"],
+    "keywords": ["Chewbacca", "Han Solo", "Lando Calrissian", "Qi'ra", "Tobias Beckett", "Dryden Vos", "Millennium Falcon", "Kessel Run", "Smuggler"]
+  },
+  {
+    "concept": "Star Wars Episode I: The Phantom Menace (1999)",
+    "aliases": ["Star Wars Episode 1", "Episode 1", "Episode I", "The Phantom Menace", "Phantom Menace", "TPM", "Star Wars Prequel"],
+    "keywords": ["Darth Maul", "Obi-Wan Kenobi", "Yoda", "Qui-Gon Jinn", "Anakin Skywalker", "Padmé Amidala", "Naboo", "Tatooine", "Podracing", "Trade Federation", "Jedi", "Sith"]
+  },
+  {
+    "concept": "Star Wars Episode II: Attack of the Clones (2002)",
+    "aliases": ["Star Wars Episode 2", "Episode 2", "Episode II", "Attack of the Clones", "AOTC", "Star Wars Prequel"],
+    "keywords": ["Anakin Skywalker", "Obi-Wan Kenobi", "Yoda", "Padmé Amidala", "Count Dooku", "Jango Fett", "Boba Fett", "Mace Windu", "Clone Troopers", "Geonosis", "Kamino", "Jedi", "Sith", "Separatist"]
+  },
+  {
+    "concept": "Star Wars Episode III: Revenge of the Sith (2005)",
+    "aliases": ["Star Wars Episode 3", "Episode 3", "Episode III", "Revenge of the Sith", "ROTS", "Star Wars Prequel"],
+    "keywords": ["Anakin Skywalker", "Darth Vader", "Obi-Wan Kenobi", "Yoda", "Padmé Amidala", "Emperor Palpatine", "General Grievous", "Mace Windu", "Clone Troopers", "Order 66", "Mustafar", "Coruscant", "Jedi", "Sith"]
+  },
+  {
+    "concept": "Star Wars Episode IV: A New Hope (1977)",
+    "aliases": ["Star Wars Episode 4", "Episode 4", "Episode IV", "A New Hope", "ANH", "Star Wars Original"],
+    "keywords": ["Chewbacca", "Darth Vader", "Han Solo", "Luke Skywalker", "Obi-Wan Kenobi", "Princess Leia", "R2-D2", "C-3PO", "Tatooine", "Death Star", "Rebellion", "Empire", "Jedi", "Sith", "Lightsaber", "Force"]
+  },
+  {
+    "concept": "Star Wars Episode V: The Empire Strikes Back (1980)",
+    "aliases": ["Star Wars Episode 5", "Episode 5", "Episode V", "The Empire Strikes Back", "Empire Strikes Back", "ESB", "Star Wars Original"],
+    "keywords": ["Boba Fett", "Chewbacca", "Darth Vader", "Han Solo", "Luke Skywalker", "Princess Leia", "Yoda", "Lando Calrissian", "R2-D2", "C-3PO", "Hoth", "Dagobah", "Bespin", "Cloud City", "AT-AT", "Rebellion", "Empire", "Jedi", "Sith", "Lightsaber", "Force"]
+  },
+  {
+    "concept": "Star Wars Episode VI: Return of the Jedi (1983)",
+    "aliases": ["Star Wars Episode 6", "Episode 6", "Episode VI", "Return of the Jedi", "ROTJ", "Star Wars Original"],
+    "keywords": ["Chewbacca", "Darth Vader", "Han Solo", "Luke Skywalker", "Princess Leia", "Yoda", "Lando Calrissian", "Emperor Palpatine", "Ewoks", "Jabba the Hutt", "R2-D2", "C-3PO", "Endor", "Death Star II", "Rebellion", "Empire", "Jedi", "Sith", "Lightsaber", "Force"]
+  },
+  {
+    "concept": "Star Wars Rebels",
+    "aliases": ["Star Wars Rebels", "Rebels", "SWR", "TV Series"],
+    "keywords": ["Ahsoka Tano", "Darth Maul", "Darth Vader", "Ezra Bridger", "Kanan Jarrus", "Hera Syndulla", "Sabine Wren", "Zeb Orrelios", "Chopper", "Thrawn", "Inquisitor", "Lothal", "Ghost Crew", "Rebellion", "Jedi", "Sith", "Lightsaber", "Force"]
+  },
+  {
+    "concept": "Star Wars: The Clone Wars",
+    "aliases": ["Star Wars: The Clone Wars", "The Clone Wars", "Clone Wars", "TCW", "TV Series"],
+    "keywords": ["Ahsoka Tano", "Anakin Skywalker", "Boba Fett", "Cad Bane", "Captain Rex", "Darth Maul", "Obi-Wan Kenobi", "Yoda", "Asajj Ventress", "Clone Troopers", "Republic", "Separatist", "Jedi", "Sith", "Lightsaber", "Force", "Battle Droids"]
+  },
+  {
+    "concept": "Finding Dory / Finding Nemo",
+    "aliases": ["Dory", "Nemo", "Finding Nemo Movie", "Finding Dory Movie"],
+    "keywords": ["finding dory", "finding nemo", "ocean", "reef", "underwater"]
+  },
+  {
+    "concept": "Star Wars: The Force Awakens (2015)",
+    "aliases": ["Star Wars: The Force Awakens", "Episode 7", "Episode VII", "The Force Awakens", "Force Awakens", "TFA", "Star Wars Sequel", "Star wars episode 7"],
+    "keywords": ["Chewbacca", "Finn", "Han Solo", "Kylo Ren", "Rey", "Poe Dameron", "BB-8", "General Leia Organa", "Luke Skywalker", "First Order", "Resistance", "Jakku", "Starkiller Base", "Millennium Falcon", "Lightsaber", "Force"]
+  },
+  {
+    "concept": "Star Wars: The Last Jedi (2017)",
+    "aliases": ["Star Wars: The Last Jedi", "Episode 8", "Episode VIII", "The Last Jedi", "Star wars episode 8", "Last Jedi", "TLJ", "Star Wars Sequel"],
+    "keywords": ["Finn", "Kylo Ren", "Rey", "Poe Dameron", "BB-8", "General Leia Organa", "Luke Skywalker", "Supreme Leader Snoke", "Captain Phasma", "Rose Tico", "DJ", "Crait", "Ahch-To", "Porgs", "First Order", "Resistance", "Jedi", "Lightsaber", "Force"]
+  },
+  {
+    "concept": "Star Wars: The Rise of Skywalker (2019)",
+    "aliases": ["Star Wars: The Rise of Skywalker", "Episode 9", "Episode IX", "Star wars episode 9", "The Rise of Skywalker", "Rise of Skywalker", "TROS", "Star Wars Sequel", "Skywalker Saga Finale"],
+    "keywords": ["Finn", "Kylo Ren", "Rey", "Poe Dameron", "BB-8", "General Leia Organa", "Luke Skywalker", "Emperor Palpatine", "Lando Calrissian", "Chewbacca", "C-3PO", "R2-D2", "Jannah", "Zorii Bliss", "Sith Troopers", "Knights of Ren", "Exegol", "Pasaana", "Kijimi", "First Order", "Resistance", "Jedi", "Sith", "Lightsaber", "Force", "Dyad"]
+  }
+]
