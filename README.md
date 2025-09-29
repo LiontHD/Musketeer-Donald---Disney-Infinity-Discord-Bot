@@ -1,12 +1,12 @@
 'Muskeeter Donald' is a feature-rich, AI-powered Discord bot designed to serve the Disney Infinity Community. It provides an intelligent, conversational interface to our extensive database and automates key community management tasks.
-The Problem
 
-    Our 4,200+ member Disney Infinity Discord community faced a critical UX problem: It was difficult to find specific content within our 1,000+ asset "Toybox" database. This led to repetitive questions from users and a significant administrative bottleneck for moderators.
+The Problem:
+Our 4,200+ member Disney Infinity Discord community faced a critical UX problem: It was difficult to find specific content within our 1,000+ asset "Toybox" database. This led to repetitive questions from users and a significant administrative bottleneck for moderators.
 
-The Solution
-
+The Solution:
 'Muskeeter Donald' solves this by acting as an AI-powered concierge for our community. It provides an intelligent, natural language interface to our database, automates content pipelines, and offers a suite of custom-built tools to enhance the user experience.
-Core Features
+
+Core Features:
 
     🤖 AI-Powered Semantic Search (RAG): Utilizes a Retrieval-Augmented Generation (RAG) system powered by Google Gemini to understand natural language queries. This allows users to find assets in our 1,000+ entry database by simply asking a question, reducing discovery time from minutes to seconds.
 
