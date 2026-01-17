@@ -164,12 +164,20 @@ class AdminCommands(commands.Cog):
         await interaction.response.defer(ephemeral=True, thinking=True)
         
         from services.toybox_service import toybox_service
-        count = await toybox_service.update_toybox_database(interaction.guild)
-        
-        if count is not None:
-            await interaction.followup.send(f"✅ Toybox database update complete. ({count} entries processed).", ephemeral=True)
-        else:
-            await interaction.followup.send("⚠️ Failed to update database. Check logs.", ephemeral=True)
+        try:
+            result = await toybox_service.update_toybox_database(interaction.guild)
+            
+            # handle both old (int) and new (tuple) return types safely
+            if isinstance(result, tuple):
+                count, ingested_count = result
+                msg = f"✅ Database update complete.\n- 📄 **JSON DB:** {count} total entries.\n- 🧠 **Vector DB:** {ingested_count} new entries ingested."
+            else:
+                count = result
+                msg = f"✅ Toybox database update complete. ({count} entries processed)."
+
+            await interaction.followup.send(msg, ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ Failed to update database: {e}", ephemeral=True)
 
 
 

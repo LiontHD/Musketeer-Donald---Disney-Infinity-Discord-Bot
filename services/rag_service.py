@@ -129,7 +129,7 @@ class RagService:
         
         if not new_ids:
             logger.info("✅ Vector DB is up to date.")
-            return
+            return 0
 
         logger.info(f"🔄 Ingesting {len(new_ids)} new toyboxes into Vector DB...")
         
@@ -167,9 +167,11 @@ class RagService:
                 metadatas=new_metadatas
             )
             logger.info(f"✅ Successfully added {len(new_ids)} new items to Vector DB.")
+            return len(new_ids)
             
         except Exception as e:
             logger.error(f"❌ Error ingesting data into Vector DB: {e}")
+            return 0
 
 
 # Global instance

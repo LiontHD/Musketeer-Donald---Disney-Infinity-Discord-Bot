@@ -69,8 +69,8 @@ class ToyboxService:
         logger.info(f"✅ Toybox database update complete. ({len(toybox_list)} entries processed).")
         
         # Sync with Vector DB
-        await rag_service.ingest_new_data(toybox_list)
+        ingested_count = await rag_service.ingest_new_data(toybox_list)
         
-        return len(toybox_list)
+        return len(toybox_list), ingested_count
 
 toybox_service = ToyboxService()
