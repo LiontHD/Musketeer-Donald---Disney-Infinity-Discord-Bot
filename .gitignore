@@ -50,14 +50,20 @@ Backup/
 recovery_temp/
 chroma_db/
 Example for add bundle command/
+edited_72pringle_tb018_-_sith_training/
 test_output*.txt
+test_batch_logic.py
+test_metadata_command.py
+test_image_injector.py
 
 # Data Files (Optional: exclude if they contain private data)
-# ratings.json
-# toybox_data.json
-# blacklisted_threads.json
-# knowledge_base.json
-# creator_mapping.json
+ratings.json
+toybox_data.json
+blacklisted_threads.json
+knowledge_base.json
+creator_mapping.json
+knowledge_graph.json
+wiki_corpus.json
 
 # Large Files
 *.zip
