@@ -1,0 +1,9 @@
+discord.py
+python-dotenv
+aiofiles
+pyairtable
+requests
+aiohttp
+google-generativeai
+chromadb
+pytest

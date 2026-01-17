@@ -1,0 +1,22 @@
+CSaveGameSlot =
+{
+	ISVALID = 1
+	TIMESTRING = "11:12:13 PM"
+	DATESTRING = "21-05-2025"
+	TIMESTAMP = 1747865533
+	LASTLEVEL = "RumpusRoom_Blank"
+	RAWLEVELNAME = "RumpusRoom_Blank"
+	AUTHOREDNAME = "72Pringle TB018 - Sith Training"
+	AUTHOREDDESC = "Welcome to Mustafar. To join the Sith, needs full commitment and total sacrifice to show full loyalty. Know only to the survivors as The Pillars Of Doom, cross between the two areas collecting as many Kyber Crystals in the quickest time. May the force be with you!"
+	TIMEPLAYED = 453
+	FILTER0 = 4
+	FILTER1 = 0
+	FILTER2 = 0
+	FILTER3 = 0
+	TOY_SOURCE = 0
+	INFINITY_VERSION = 3
+}
+RumpusSaveGame =
+{
+	LEADERBOARD_ELIGIBLE = 0
+}
