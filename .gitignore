@@ -55,6 +55,9 @@ test_output*.txt
 test_batch_logic.py
 test_metadata_command.py
 test_image_injector.py
+Venv aktivieren.rtf
+tests/
+EXAMPLE/
 
 # Data Files (Optional: exclude if they contain private data)
 ratings.json
