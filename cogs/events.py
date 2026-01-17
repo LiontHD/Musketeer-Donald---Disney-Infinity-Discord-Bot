@@ -71,14 +71,19 @@ class Events(commands.Cog):
                         refinement_prompt,
                         generation_config=genai.types.GenerationConfig(temperature=0.0)
                     )
-                    if refinement_response and hasattr(refinement_response, 'text'):
+                    
+                    search_query = original_query # Default fallback
+                    if refinement_response and hasattr(refinement_response, 'parts') and refinement_response.parts:
                         try:
-                            search_query = refinement_response.text.strip()
-                            logger.info(f"Query Refinement: Original='{original_query}' -> Refined='{search_query}'")
-                        except (AttributeError, ValueError):
-                            logger.info(f"Query Refinement: Failed to get text, using original query.")
+                            # Verify if there is text content before accessing
+                            if refinement_response.text:
+                                search_query = refinement_response.text.strip()
+                                logger.info(f"Query Refinement: Original='{original_query}' -> Refined='{search_query}'")
+                        except ValueError:
+                             logger.warning(f"Query Refinement: Response blocked or invalid (Finish Reason: {refinement_response.candidates[0].finish_reason}). Using original query.")
                     else:
-                        logger.info(f"Query Refinement: No response, using original query.")
+                        logger.info(f"Query Refinement: No valid text parts returned. Using original query.")
+
                 except Exception as e:
                     logger.error(f"⚠️ Error during query refinement: {e}. Falling back to original query.")
                     search_query = original_query

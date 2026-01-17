@@ -3,6 +3,7 @@ import json
 import asyncio
 import config
 from services.tag_analyzer import SimpleTagAnalyzer
+from services.rag_service import rag_service
 from utils.logger import logger
 
 class ToyboxService:
@@ -64,7 +65,12 @@ class ToyboxService:
         with open(config.TOYBOX_DATA_FILE, "w", encoding='utf-8') as f:
             json.dump(toybox_list, f, indent=4, ensure_ascii=False)
         
+        
         logger.info(f"✅ Toybox database update complete. ({len(toybox_list)} entries processed).")
+        
+        # Sync with Vector DB
+        await rag_service.ingest_new_data(toybox_list)
+        
         return len(toybox_list)
 
 toybox_service = ToyboxService()
