@@ -57,11 +57,11 @@ class AdminReviewView(discord.ui.View):
                 if thread.archived:
                     await thread.edit(archived=False)
 
-                # Post review
+                # Post review with random color
                 embed = discord.Embed(
                     title="📝 Toybox Review",
                     description=review_data['review_text'],
-                    color=discord.Color.green()
+                    color=discord.Color.random()
                 )
                 user = interaction.client.get_user(user_id)
                 embed.set_author(name=user.display_name if user else f"User {user_id}", icon_url=user.display_avatar.url if user and user.display_avatar else None)
@@ -82,10 +82,14 @@ class AdminReviewView(discord.ui.View):
             except Exception as e:
                 await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
-        # Update Admin Message
-        for item in self.children:
-            item.disabled = True
-        await interaction.message.edit(content="✅ **APPROVED**", view=self)
+        # Update Admin Message Embed
+        if interaction.message.embeds:
+            embed = interaction.message.embeds[0]
+            embed.color = discord.Color.green()
+            embed.title = "📝 Daily Toybox Review (Approved)"
+            await interaction.message.edit(embed=embed, view=None)
+        else:
+            await interaction.message.edit(content="✅ **APPROVED**", view=None)
 
 
     async def reject_callback(self, interaction: discord.Interaction):
@@ -104,10 +108,14 @@ class AdminReviewView(discord.ui.View):
             except:
                 pass
 
-        # Update Admin Message
-        for item in self.children:
-            item.disabled = True
-        await interaction.message.edit(content="🔴 **REJECTED**", view=self)
+        # Update Admin Message Embed
+        if interaction.message.embeds:
+            embed = interaction.message.embeds[0]
+            embed.color = discord.Color.red()
+            embed.title = "📝 Daily Toybox Review (Rejected)"
+            await interaction.message.edit(embed=embed, view=None)
+        else:
+            await interaction.message.edit(content="🔴 **REJECTED**", view=None)
 
 class DailyToyboxAdmin(commands.Cog):
     def __init__(self, bot):
@@ -151,7 +159,7 @@ class DailyToyboxAdmin(commands.Cog):
                         embed = discord.Embed(
                             title="📝 Toybox Review",
                             description=review_data['review_text'],
-                            color=discord.Color.green()
+                            color=discord.Color.random() # Random color for each review
                         )
                         user = interaction.client.get_user(user_id)
                         embed.set_author(
@@ -168,8 +176,14 @@ class DailyToyboxAdmin(commands.Cog):
                     except Exception as e:
                         await interaction.followup.send(f"❌ Error posting review to thread: {e}", ephemeral=True)
                         
-                # Update message
-                await interaction.message.edit(content="✅ **APPROVED**", view=None)
+                # Update Admin Message Embed
+                if interaction.message.embeds:
+                    embed = interaction.message.embeds[0]
+                    embed.color = discord.Color.green()
+                    embed.title = "📝 Daily Toybox Review (Approved)"
+                    await interaction.message.edit(embed=embed, view=None)
+                else:
+                    await interaction.message.edit(content="✅ **APPROVED**", view=None)
                 
             elif custom_id.startswith('admin_reject_'):
                 parts = custom_id.split("_")
@@ -186,7 +200,14 @@ class DailyToyboxAdmin(commands.Cog):
                     except:
                         pass
                         
-                await interaction.message.edit(content="🔴 **REJECTED**", view=None)
+                # Update Admin Message Embed
+                if interaction.message.embeds:
+                    embed = interaction.message.embeds[0]
+                    embed.color = discord.Color.red()
+                    embed.title = "📝 Daily Toybox Review (Rejected)"
+                    await interaction.message.edit(embed=embed, view=None)
+                else:
+                    await interaction.message.edit(content="🔴 **REJECTED**", view=None)
 
 async def setup(bot):
     await bot.add_cog(DailyToyboxAdmin(bot))

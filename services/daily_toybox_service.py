@@ -94,8 +94,8 @@ class DailyToyboxService:
 
     # --- Review & Moderation Logic ---
 
-    async def submit_review(self, toybox_id: int, user_id: int, review_text: str) -> int:
-        """Submits a review as 'pending'. Returns review_id. Raises ValueError if already reviewed."""
+    async def submit_review(self, toybox_id: int, user_id: int, review_text: str, status: str = 'pending') -> int:
+        """Submits a review with specified status. Returns review_id. Raises ValueError if already reviewed."""
         user_id_str = str(user_id)
         async with self._lock:
             with sqlite3.connect(DB_PATH) as db:
@@ -105,8 +105,8 @@ class DailyToyboxService:
                     raise ValueError("You have already submitted a review for this Toybox.")
                 
                 cursor = db.execute(
-                    "INSERT INTO daily_reviews (toybox_id, user_id, review_text, status, timestamp) VALUES (?, ?, ?, 'pending', ?)",
-                    (toybox_id, user_id_str, review_text, datetime.datetime.utcnow().isoformat())
+                    "INSERT INTO daily_reviews (toybox_id, user_id, review_text, status, timestamp) VALUES (?, ?, ?, ?, ?)",
+                    (toybox_id, user_id_str, review_text, status, datetime.datetime.utcnow().isoformat())
                 )
                 db.commit()
                 return cursor.lastrowid
@@ -157,5 +157,21 @@ class DailyToyboxService:
         except Exception as e:
             logger.error(f"Error reading toybox URL for ID {toybox_id}: {e}")
         return ""
+
+    def get_toybox_details(self, toybox_id: int) -> dict:
+        """Looks up the details for a given toybox ID from the toybox_data.json file."""
+        import json
+        import config
+        if not os.path.exists(config.TOYBOX_DATA_FILE):
+            return None
+        try:
+            with open(config.TOYBOX_DATA_FILE, 'r', encoding='utf-8') as f:
+                toyboxes = json.load(f)
+                for tb in toyboxes:
+                    if tb.get('id') == toybox_id:
+                        return tb
+        except Exception as e:
+            logger.error(f"Error reading toybox details for ID {toybox_id}: {e}")
+        return None
 
 daily_toybox_service = DailyToyboxService()
