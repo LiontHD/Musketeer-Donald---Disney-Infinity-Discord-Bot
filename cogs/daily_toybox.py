@@ -49,7 +49,11 @@ async def get_thread_image(bot, url: str):
             # Check attachments
             if msg.attachments:
                 for att in msg.attachments:
-                    if att.url.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                    if att.content_type and att.content_type.startswith('image/'):
+                        return att.url
+                    # Fallback check of path without query parameters
+                    path = att.url.split('?')[0].lower()
+                    if path.endswith(('.png', '.jpg', '.jpeg', '.webp', '.gif')):
                         return att.url
             # Check embeds
             if msg.embeds:
