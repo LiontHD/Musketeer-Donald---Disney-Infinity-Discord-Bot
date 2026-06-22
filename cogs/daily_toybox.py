@@ -114,7 +114,7 @@ class DailyToybox(commands.Cog):
                 view = discord.ui.View.from_message(interaction.message)
                 for item in view.children:
                     if isinstance(item, discord.ui.Button) and item.custom_id == custom_id:
-                        item.label = f"I played this! ({play_count})" if play_count > 0 else "I played this!"
+                        item.label = f"✅ I played this! ({play_count})" if play_count > 0 else "✅ I played this!"
                 
                 await interaction.response.edit_message(view=view)
             except Exception as e:

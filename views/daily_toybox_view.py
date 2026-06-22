@@ -106,16 +106,16 @@ class DailyToyboxView(discord.ui.View):
 
         # Link to thread (View Toybox)
         # Note: Link buttons must use ButtonStyle.link.
-        self.add_item(discord.ui.Button(label="View Toybox", url=thread_url, style=discord.ButtonStyle.link))
+        self.add_item(discord.ui.Button(label="🎮 View Toybox", url=thread_url, style=discord.ButtonStyle.link))
         
         # Link to video if available
         if video_url:
-            self.add_item(discord.ui.Button(label="Playthrough video", url=video_url, style=discord.ButtonStyle.link))
+            self.add_item(discord.ui.Button(label="📺 Playthrough video", url=video_url, style=discord.ButtonStyle.link))
 
         # Persistent 'I Played This' button
         play_count = daily_toybox_service.get_play_count(toybox_id)
         play_btn = discord.ui.Button(
-            label=f"I played this! ({play_count})" if play_count > 0 else "I played this!", 
+            label=f"✅ I played this! ({play_count})" if play_count > 0 else "✅ I played this!", 
             style=discord.ButtonStyle.secondary,
             custom_id=f"daily_play_{toybox_id}"
         )
@@ -124,7 +124,7 @@ class DailyToyboxView(discord.ui.View):
 
         # Persistent 'Write Review' button
         review_btn = discord.ui.Button(
-            label="Write review", 
+            label="📝 Write review", 
             style=discord.ButtonStyle.secondary,
             custom_id=f"daily_review_{toybox_id}"
         )
@@ -146,7 +146,7 @@ class DailyToyboxView(discord.ui.View):
             view = discord.ui.View.from_message(interaction.message)
             for item in view.children:
                 if isinstance(item, discord.ui.Button) and item.custom_id == interaction.custom_id:
-                    item.label = f"I played this! ({play_count})" if play_count > 0 else "I played this!"
+                    item.label = f"✅ I played this! ({play_count})" if play_count > 0 else "✅ I played this!"
             
             await interaction.response.edit_message(view=view)
         except Exception as e:
