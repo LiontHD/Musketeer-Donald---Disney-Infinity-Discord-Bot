@@ -28,13 +28,6 @@ def get_youtube_thumbnail(url: str):
     return None
 
 def get_color_for_tags(tags: list):
-    tags_lower = [t.lower() for t in tags]
-    if "star wars" in tags_lower:
-        return discord.Color.from_rgb(0, 168, 255) # Force Blue
-    elif "marvel" in tags_lower:
-        return discord.Color.from_rgb(240, 19, 30) # Marvel Red
-    elif "disney" in tags_lower:
-        return discord.Color.from_rgb(17, 56, 91) # Disney Blue
     return discord.Color.gold()
 
 async def get_thread_image(bot, url: str):
@@ -114,11 +107,16 @@ class DailyToybox(commands.Cog):
             t_id_str = custom_id.replace("daily_play_", "")
             try:
                 t_id = int(t_id_str)
-                marked_played = await daily_toybox_service.toggle_play(t_id, interaction.user.id)
-                if marked_played:
-                    await interaction.response.send_message("✅ You have marked this Toybox as played!", ephemeral=True)
-                else:
-                    await interaction.response.send_message("❌ You have unmarked this Toybox as played.", ephemeral=True)
+                await daily_toybox_service.toggle_play(t_id, interaction.user.id)
+                play_count = daily_toybox_service.get_play_count(t_id)
+                
+                # Recreate view components with updated play count
+                view = discord.ui.View.from_message(interaction.message)
+                for item in view.children:
+                    if isinstance(item, discord.ui.Button) and item.custom_id == custom_id:
+                        item.label = f"✅ I Played This! ({play_count})" if play_count > 0 else "✅ I Played This!"
+                
+                await interaction.response.edit_message(view=view)
             except Exception as e:
                 await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
                 
@@ -133,23 +131,21 @@ class DailyToybox(commands.Cog):
                 except Exception as e:
                     await interaction.response.send_message(f"❌ Error setting up review modal: {e}", ephemeral=True)
 
-    @tasks.loop(time=datetime.time(hour=8, minute=0, tzinfo=ZoneInfo('Europe/London')))
-    async def daily_task(self):
-        logger.info("⏰ Running Daily Toybox Task (V2)...")
-        
+    async def generate_daily_post(self) -> tuple[discord.Embed, DailyToyboxView, dict]:
+        """Generates the daily toybox post (embed, view, and selected toybox)."""
         if not os.path.exists(config.TOYBOX_DATA_FILE):
             logger.error("Toybox data file not found!")
-            return
+            return None, None, None
 
         try:
             with open(config.TOYBOX_DATA_FILE, 'r') as f:
                 toyboxes = json.load(f)
         except Exception as e:
             logger.error(f"Error loading toyboxes: {e}")
-            return
+            return None, None, None
 
         if not toyboxes:
-            return
+            return None, None, None
 
         # Filtering logic (Cooldown / Repeat Prevention)
         available_toyboxes = []
@@ -181,12 +177,11 @@ class DailyToybox(commands.Cog):
             clean_desc = "A mysterious Toybox waiting to be explored!"
 
         tags = toybox.get('tags', [])
-        embed_color = get_color_for_tags(tags)
         
         embed = discord.Embed(
             title=f"🌟 Toybox of the Day: {toybox.get('name', 'Unknown')}",
             description=clean_desc,
-            color=embed_color,
+            color=discord.Color.gold(), # Always Yellow
             url=toybox.get('url', '')
         )
         
@@ -214,12 +209,18 @@ class DailyToybox(commands.Cog):
         if img_url:
             embed.set_image(url=img_url)
 
-        embed.set_footer(text="Daily Toybox Alert • Click 'I Played This!' below if you've explored it.")
-
         # Prepare View
         view = DailyToyboxView(toybox_id=toybox['id'], thread_url=toybox.get('url', ''), video_url=video_url)
 
-        # Send to channel
+        return embed, view, toybox
+
+    @tasks.loop(time=datetime.time(hour=8, minute=0, tzinfo=ZoneInfo('Europe/London')))
+    async def daily_task(self):
+        logger.info("⏰ Running Daily Toybox Task (V2)...")
+        embed, view, toybox = await self.generate_daily_post()
+        if not embed or not toybox:
+            return
+
         channel = self.bot.get_channel(DAILY_CHANNEL_ID)
         if channel:
             try:
@@ -281,11 +282,27 @@ class DailyToybox(commands.Cog):
     async def before_tasks(self):
         await self.bot.wait_until_ready()
 
-    @app_commands.command(name="test_daily_toybox", description="Admin only: Force post the Daily Toybox immediately for testing.")
+    @app_commands.command(name="test_daily_toybox", description="Admin only: Force post the Daily Toybox immediately in this channel for testing.")
     @app_commands.checks.has_permissions(administrator=True)
     async def test_daily_toybox(self, interaction: discord.Interaction):
-        await interaction.response.send_message("Starting manual Daily Toybox run...", ephemeral=True)
-        await self.daily_task()
+        await interaction.response.defer(ephemeral=True)
+        embed, view, toybox = await self.generate_daily_post()
+        if not embed or not toybox:
+            await interaction.followup.send("❌ Failed to generate Daily Toybox post.", ephemeral=True)
+            return
+
+        try:
+            # Send directly to the channel where command was executed, no role ping
+            await interaction.channel.send(
+                content="🧪 **Daily Toybox Test Post** (Sent only to this channel, no subscriber ping)",
+                embed=embed,
+                view=view
+            )
+            # Add to history so it doesn't get repeated in actual runs
+            daily_toybox_service.add_to_history(toybox['id'])
+            await interaction.followup.send("✅ Test Daily Toybox posted successfully in this channel!", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Failed to send post: {e}", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(DailyToybox(bot))

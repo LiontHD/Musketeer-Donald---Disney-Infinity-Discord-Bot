@@ -122,7 +122,8 @@ class DailyToyboxService:
         with sqlite3.connect(DB_PATH) as db:
             db.row_factory = sqlite3.Row
             cursor = db.execute("SELECT * FROM daily_reviews WHERE review_id = ?", (review_id,))
-            return dict(cursor.fetchone()) if cursor.fetchone() else None
+            row = cursor.fetchone()
+            return dict(row) if row else None
 
     # --- Cooldown / History Logic ---
 

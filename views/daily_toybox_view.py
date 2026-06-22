@@ -65,8 +65,9 @@ class DailyToyboxView(discord.ui.View):
             self.add_item(discord.ui.Button(label="📺 Playthrough Video", url=video_url, style=discord.ButtonStyle.link))
 
         # Persistent 'I Played This' button
+        play_count = daily_toybox_service.get_play_count(toybox_id)
         play_btn = discord.ui.Button(
-            label="✅ I Played This!", 
+            label=f"✅ I Played This! ({play_count})" if play_count > 0 else "✅ I Played This!", 
             style=discord.ButtonStyle.secondary,
             custom_id=f"daily_play_{toybox_id}"
         )
@@ -90,12 +91,16 @@ class DailyToyboxView(discord.ui.View):
         t_id_str = interaction.custom_id.replace("daily_play_", "")
         try:
             t_id = int(t_id_str)
-            marked_played = await daily_toybox_service.toggle_play(t_id, interaction.user.id)
-            if marked_played:
-                # Also update embed to show plays count if we want, but user requested no player count.
-                await interaction.response.send_message("✅ You have marked this Toybox as played!", ephemeral=True)
-            else:
-                await interaction.response.send_message("❌ You have unmarked this Toybox as played.", ephemeral=True)
+            await daily_toybox_service.toggle_play(t_id, interaction.user.id)
+            play_count = daily_toybox_service.get_play_count(t_id)
+            
+            # Recreate view components with updated play count
+            view = discord.ui.View.from_message(interaction.message)
+            for item in view.children:
+                if isinstance(item, discord.ui.Button) and item.custom_id == interaction.custom_id:
+                    item.label = f"✅ I Played This! ({play_count})" if play_count > 0 else "✅ I Played This!"
+            
+            await interaction.response.edit_message(view=view)
         except Exception as e:
             await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
 
