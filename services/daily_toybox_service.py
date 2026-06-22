@@ -141,4 +141,20 @@ class DailyToyboxService:
             cursor = db.execute("SELECT 1 FROM daily_history WHERE toybox_id = ? AND timestamp >= ?", (toybox_id, cutoff_date))
             return cursor.fetchone() is not None
 
+    def get_toybox_url(self, toybox_id: int) -> str:
+        """Looks up the jump URL for a given toybox ID from the toybox_data.json file."""
+        import json
+        import config
+        if not os.path.exists(config.TOYBOX_DATA_FILE):
+            return ""
+        try:
+            with open(config.TOYBOX_DATA_FILE, 'r', encoding='utf-8') as f:
+                toyboxes = json.load(f)
+                for tb in toyboxes:
+                    if tb.get('id') == toybox_id:
+                        return tb.get('url', '')
+        except Exception as e:
+            logger.error(f"Error reading toybox URL for ID {toybox_id}: {e}")
+        return ""
+
 daily_toybox_service = DailyToyboxService()

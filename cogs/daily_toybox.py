@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands, tasks
+from discord import app_commands
 import json
 import os
 import random
@@ -101,6 +102,36 @@ class DailyToybox(commands.Cog):
                 await after.send(embed=embed)
             except Exception as e:
                 logger.error(f"Error sending welcome DM to {after.id}: {e}")
+
+    @commands.Cog.listener()
+    async def on_interaction(self, interaction: discord.Interaction):
+        """Global listener for the persistent Daily Toybox buttons (Play and Review)."""
+        if interaction.type != discord.InteractionType.component or interaction.data.get('component_type') != 2:
+            return
+            
+        custom_id = interaction.data.get('custom_id', '')
+        if custom_id.startswith('daily_play_'):
+            t_id_str = custom_id.replace("daily_play_", "")
+            try:
+                t_id = int(t_id_str)
+                marked_played = await daily_toybox_service.toggle_play(t_id, interaction.user.id)
+                if marked_played:
+                    await interaction.response.send_message("✅ You have marked this Toybox as played!", ephemeral=True)
+                else:
+                    await interaction.response.send_message("❌ You have unmarked this Toybox as played.", ephemeral=True)
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Error: {e}", ephemeral=True)
+                
+        elif custom_id.startswith('daily_review_'):
+            parts = custom_id.split("_", 2)
+            if len(parts) >= 3:
+                try:
+                    t_id = int(parts[2])
+                    thread_url = daily_toybox_service.get_toybox_url(t_id)
+                    from views.daily_toybox_view import ReviewModal
+                    await interaction.response.send_modal(ReviewModal(t_id, thread_url))
+                except Exception as e:
+                    await interaction.response.send_message(f"❌ Error setting up review modal: {e}", ephemeral=True)
 
     @tasks.loop(time=datetime.time(hour=8, minute=0, tzinfo=ZoneInfo('Europe/London')))
     async def daily_task(self):
@@ -249,6 +280,12 @@ class DailyToybox(commands.Cog):
     @weekly_highlight_task.before_loop
     async def before_tasks(self):
         await self.bot.wait_until_ready()
+
+    @app_commands.command(name="test_daily_toybox", description="Admin only: Force post the Daily Toybox immediately for testing.")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def test_daily_toybox(self, interaction: discord.Interaction):
+        await interaction.response.send_message("Starting manual Daily Toybox run...", ephemeral=True)
+        await self.daily_task()
 
 async def setup(bot):
     await bot.add_cog(DailyToybox(bot))

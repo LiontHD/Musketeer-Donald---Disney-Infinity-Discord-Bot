@@ -77,8 +77,7 @@ class DailyToyboxView(discord.ui.View):
         review_btn = discord.ui.Button(
             label="📝 Write Review", 
             style=discord.ButtonStyle.secondary,
-            custom_id=f"daily_review_{toybox_id}_{thread_url}" # Encode thread_url too, though it's long.
-            # Better: thread_url is known via toybox_id. But keeping it simple for now.
+            custom_id=f"daily_review_{toybox_id}"
         )
         review_btn.callback = self.review_callback
         self.add_item(review_btn)
@@ -104,8 +103,12 @@ class DailyToyboxView(discord.ui.View):
         if not interaction.custom_id or not interaction.custom_id.startswith("daily_review_"):
             return
             
-        parts = interaction.custom_id.split("_", 3)
+        parts = interaction.custom_id.split("_", 2)
         if len(parts) >= 3:
-            t_id = int(parts[2])
-            thread_url = parts[3] if len(parts) > 3 else ""
-            await interaction.response.send_modal(ReviewModal(t_id, thread_url))
+            try:
+                t_id = int(parts[2])
+                # Lookup the thread URL dynamically to avoid exceeding 100 character custom_id limit
+                thread_url = daily_toybox_service.get_toybox_url(t_id)
+                await interaction.response.send_modal(ReviewModal(t_id, thread_url))
+            except Exception as e:
+                await interaction.response.send_message(f"❌ Error setting up review modal: {e}", ephemeral=True)
